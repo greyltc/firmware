@@ -8,6 +8,8 @@
 //#define INaddr 0x3A  // 8574A addr 000
 #define OUTaddr 0x3A // 8574A addr 001
 
+//SPISettings settingsA(2000000, MSBFIRST, SPI_MODE1); 
+
 void setup()
 {
   //pinMode(12, INPUT);  // to read /INT
@@ -16,7 +18,11 @@ void setup()
   delay(10);
   expanderWrite(OUTaddr, 0x01); // deselect the switches
   delay(10);
-  SPI.beginTransaction(SPISettings(10000, MSBFIRST, SPI_MODE0)); // start the SPI library
+  //SPI.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0)); // start the SPI library
+  //SPI.beginTransaction(SPISettings(14000000, MSBFIRST, SPI_MODE0));
+  SPI.begin();
+  //SPISettings settingsA(2000000, MSBFIRST, SPI_MODE1); 
+  SPI.beginTransaction(SPISettings(20000, MSBFIRST, SPI_MODE0));
   delay(10);
   //setSwitchState(0x00); // open all the switches
 } 
@@ -61,7 +67,7 @@ void loop()
   expanderWrite(OUTaddr, 0x00); //cs enable
   SPI.transfer(0xff);  //Send value to record into register
   expanderWrite(OUTaddr, 0x01); //cs disable
-  delay(3000);
+  delay(1000);
 
   expanderWrite(OUTaddr, 0x00); //cs enable
   SPI.transfer(0x00);  //Send value to record into register
