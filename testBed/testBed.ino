@@ -4,7 +4,8 @@
 // 8574  Address range is 0x20-0x27
 // 8574A Address range is 0x38-0x3F
 
-#define ADDR_8574A 0x3A // 8574A addr 010
+//#define ADDR_8574A 0x3A // 8574A addr 010
+#define ADDR_8574A 0x38 // 8574A addr 000
 
 void setup()
 {
