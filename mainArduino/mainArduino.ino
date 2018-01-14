@@ -16,7 +16,7 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 
 #define ERR_MSG client.print("ERROR: Got bad command '"); client.print(cmd); client.println("'");
 
-#define FIRMWARE_VER "997604e"
+#define FIRMWARE_VER "59aef84"
 
 #include <Wire.h>
 #include <Adafruit_ADS1015.h>
