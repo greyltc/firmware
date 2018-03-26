@@ -21,36 +21,54 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 #include <Wire.h>
 #include <Adafruit_ADS1015.h>
 
+#define MCP_IODIRA_ADDR 0x00
+#define MCP_IODIRB_ADDR 0x01
+#define MCP_IOCON_ADDR 0x0A
+#define MCP_OLATA_ADDR 0x14
+#define MCP_OLATB_ADDR 0x15
+#define MCP_OLATB_ADDR 0x15
+
+#define MCP_SPI_CTRL_BYTE_HEADER 0x40
+#define MCP_SPI_READ 0x01
+#define MCP_SPI_WRITE 0x00
+
+// ERRORS
+#define NO_ERROR 0
+#define ERR_BAD_PIX -1 //pixel selection out of bounds
+#define ERR_BAD_SUBSTRATE -2 //substrate selection out of bounds
+#define ERR_SELECTION_A_DISAGREE -3 //MCP did not read back the value we expected for port A
+#define ERR_SELECTION_B_DISAGREE -4 //MCP did not read back the value we expected for port B
+#define ERR_GENERIC -5 //Uninitialized error code
+#define ERR_SELECTION_DOUBLE_DISAGREE -7 //MCP did not read back the value we expected port A and B
+
+// wiring to the expander
+#define NONE 0x00
+//PORTB connections
+#define P1 0x01
+#define P2 0x02
+#define P3 0x04
+#define P4 0x08
+#define P5 0x10
+#define P6 0x20
+#define P7 0x40
+#define P8 0x80
+
+//PORTA connections
+#define TOP 0x01
+#define BOT 0x02
+#define V_D_EN 0x04
+
 Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
-const int CS_PIN = 53; // port expander chip select pin
-const int BOT_pin = 2; // port expander pin for BOT circuit connection
-const int LED_pin = 13; // alive LED pin
-const int aliveCycleT = 100; //ms
+const unsigned int PE_CS_PIN = 48; // arduino pin for expanders chip select pin
+const unsigned int LED_pin = 13; // arduino pin for alive LED
+const unsigned int aliveCycleT = 100; //ms
 const unsigned int serverPort = 23;
 
 //MCP inputchip(1, 10);             // Instantiate an object called "inputchip" on an MCP23S17 device at address 1
   								  // and slave-select on Arduino pin 10
 //MCP outputchip(EXP_ADDR, CS_PIN);            // Instantiate an object called "outputchip" on an MCP23S17 device at address 0
   								  // and slave-select on Arduino pin 4
-
-const int TOP = bit(0);
-const int BOT = bit(1);
-const int V_D_EN = bit(2);
-
-const int P1 = bit(0);
-const int P2 = bit(1);
-const int P3 = bit(2);
-const int P4 = bit(3);
-const int P5 = bit(4);
-const int P6 = bit(5);
-const int P7 = bit(6);
-const int P8 = bit(7);
-
-const int SPI_CTRL_BYTE = 0x40;
-const int SPI_READ = 0x01;
-
-int on_pins = 0x00;
 
 // setup telnet server
 EthernetServer server(serverPort);
@@ -59,16 +77,12 @@ EthernetServer server(serverPort);
 // the media access control (ethernet hardware) address for the shield:
 const byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };  
 
-//const int
-
 // places to store adc values
 int16_t adc0, adc1, adc2, adc3;
 
-
+uint8_t connected_devices = 0x00;
 
 void setup() {
-  // places to keep mcp23x17 comms variables
-  uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
 
   //Serial.begin(115200);
   
@@ -87,41 +101,53 @@ void setup() {
   //Serial.println(" ...");
   
   pinMode(LED_pin, OUTPUT); // to show we are working
-  pinMode(CS_PIN, OUTPUT); // get ready to chipselect
-  digitalWrite(CS_PIN, HIGH); //deselect
+  pinMode(PE_CS_PIN, OUTPUT); // get ready to chipselect
+  digitalWrite(PE_CS_PIN, HIGH); //deselect
 
-  // start the SPI library:
+  // start the SPI library
   SPI.begin();
 
-  //loop through all the expanders and set their registers properly
-  for(mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr++){
-    //set HACON.HAEN
-    mcp_reg_addr = 0x0A;
-    mcp_reg_value = 0x01 << 3;
-    mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value); //probs this first one programs all the parts at once (if they just POR'd)
-
-    mcp_reg_addr = 0x00; //iodirA register address
-    mcp_reg_value = 0x00; //set port A to all outputs
-    mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value);
-  
-    mcp_reg_addr = 0x01; //iodirB register address
-    mcp_reg_value = 0x00; //set port B to all outputs
-    mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value);
-    
-    mcp_reg_addr = 0x14; // OLATA gpio register address
-    mcp_reg_value = 0x00; // all pins low
-    mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
-
-    mcp_reg_addr = 0x15; // OLATB register address
-    mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
-  }
+  // setup the port expanders
+  connected_devices = setup_MCP();
 }
 
+uint8_t setup_MCP(void){
+  // places to keep mcp23x17 comms variables
+  volatile uint8_t mcp_dev_addr, mcp_reg_value;
+  volatile uint8_t connected_devices_mask = 0x00;
+  
+  //loop through all the expanders and set their registers properly
+  for (mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr ++){
+    
+    //probs this first one programs all the parts at once (if they just POR'd)
+    mcp_reg_value = 0x08; //set IOCON --> HACON.HAEN
+    mcp23x17_write(mcp_dev_addr, MCP_IOCON_ADDR, mcp_reg_value);
+
+    mcp_reg_value = 0x00; // PORTA out low
+    mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+
+    mcp_reg_value = 0x00; // PORTB out low
+    mcp23x17_write(mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value);
+
+    mcp_reg_value = 0x00; //all of PORTA to are outputs
+    mcp23x17_write(mcp_dev_addr, MCP_IODIRA_ADDR, mcp_reg_value);
+  
+    mcp_reg_value = 0x00; //all of PORTB to are outputs
+    mcp23x17_write(mcp_dev_addr, MCP_IODIRB_ADDR, mcp_reg_value);
+
+    mcp_reg_value = mcp23x17_read(mcp_dev_addr, MCP_IOCON_ADDR);
+    if (mcp_reg_value == 0x08) { //IOCON --> HACON.HAEN should be set
+      connected_devices_mask |= 0x01 << mcp_dev_addr;
+    }
+  }
+  return (connected_devices);
+}
 
 String cmd = "";
 void loop() {
   // places to keep mcp23x17 comms variables
   uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
+  int pixSetErr = ERR_GENERIC;
   
   //blink the alive pin
   digitalWrite(LED_pin, HIGH);
@@ -147,29 +173,10 @@ void loop() {
     } else if (cmd.equals("s")){ //pixel deselect command
       mcp23x17_all_off();
     } else if (cmd.startsWith("s") & (cmd.length() == 3)){ //pixel select command
-      int substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
-      int pixel = cmd.charAt(2) - '1' ;
-      if ((substrate >= 0) & (substrate <= 7) & (pixel >= -1) & (pixel <= 7)){
-        mcp23x17_all_off();
-        mcp_dev_addr = substrate;
-        mcp_reg_addr = 0x14; // OLATA register address
-        if (pixel == 7 | pixel == 5 | pixel == 6 | pixel == 4){
-          mcp_reg_value = 1 << 0; // top bus bar connection is closer to these pixels
-        } else {
-          mcp_reg_value = 1 << 1; // bottom bus bar connection is closer to the rest
-        }
-        mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value); //enable TOP or BOT bus connection
-
-        // now enable the pixel connection
-        mcp_reg_addr = 0x15; // OLATB register address
-        mcp_reg_value = 1 << pixel;
-        mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value);
-      } else { // selection out of bounds
-        ERR_MSG
-        client.print(substrate);
-        client.println("");
-        client.print(pixel);
-        client.println("");
+      pixSetErr = set_pix(cmd.substring(1));
+      if (pixSetErr !=0){
+        client.print("ERROR: Pixel selection error code ");
+        client.print(pixSetErr);
       }
     } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
       int pd = cmd.charAt(1) - '0';
@@ -242,27 +249,27 @@ void loop() {
 }
 
 uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
-  uint8_t crtl_byte = SPI_CTRL_BYTE | SPI_READ | dev_address << 1;
+  uint8_t crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_SPI_READ | (dev_address << 1);
   uint8_t result = 0x00;
   
-  digitalWrite(CS_PIN, LOW); //select
+  digitalWrite(PE_CS_PIN, LOW); //select
   SPI.transfer(crtl_byte); // write operation
   SPI.transfer(reg_address); // iodirA register address
   result = SPI.transfer(0x00); // read the register
-  digitalWrite(CS_PIN, HIGH); //deselect
+  digitalWrite(PE_CS_PIN, HIGH); //deselect
   delay(10);
 
   return(result);
 }
 
 void mcp23x17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
-  uint8_t crtl_byte = SPI_CTRL_BYTE | dev_address << 1;
+  uint8_t crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_SPI_WRITE | (dev_address << 1);
   
-  digitalWrite(CS_PIN, LOW); //select
+  digitalWrite(PE_CS_PIN, LOW); //select
   SPI.transfer(crtl_byte); // write operation
   SPI.transfer(reg_address); // iodirA register address
   SPI.transfer(value); // write the register
-  digitalWrite(CS_PIN, HIGH); //deselect
+  digitalWrite(PE_CS_PIN, HIGH); //deselect
   delay(10);
 }
 
@@ -277,4 +284,52 @@ void mcp23x17_all_off(void){
     mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
   }
 }
+
+int set_pix(String pix){
+  int error = NO_ERROR;
+  // places to keep mcp23x17 comms variables
+  uint8_t mcp_dev_addr, mcp_reg_value;
+  uint8_t mcp_readback_value = 0x00;
+  
+  int substrate = pix.charAt(0) - 'a'; //convert a, b, c... to 0, 1, 2...
+  int pixel = pix.charAt(1) - '1' ;
+  if ((substrate >= 0) & (substrate <= 7)) {
+    //mcp23x17_all_off();
+    mcp_dev_addr = substrate;
+    if ((pixel >= -1) & (pixel <= 7)) {
+      if (pixel == 7 | pixel == 5 | pixel == 6 | pixel == 4) {
+        mcp_reg_value = TOP; // top bus bar connection is closer to these pixels
+      } else if (pixel == 3 | pixel == 1 | pixel == 2 | pixel == 0){
+        mcp_reg_value = BOT; // bottom bus bar connection is closer to the rest
+      } else { // turn off portB
+        mcp_reg_value = 0x00;
+      }
+      mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value); //enable TOP or BOT bus connection
+      mcp_readback_value = mcp23x17_read(mcp_dev_addr,MCP_OLATA_ADDR);
+      
+      if (mcp_readback_value != mcp_reg_value) {
+        error += ERR_SELECTION_A_DISAGREE;
+      }
+
+      if (pixel == -1) {
+        mcp_reg_value = 0x00;
+      } else {
+        mcp_reg_value = 0x01 << pixel;
+      }
+      mcp23x17_write(mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value); //enable pixel connection
+      mcp_readback_value = mcp23x17_read(mcp_dev_addr,MCP_OLATB_ADDR);
+
+      if (mcp_readback_value != mcp_reg_value) {
+        error += ERR_SELECTION_B_DISAGREE;
+      }
+      
+    } else { // pixel out of bounds
+      error = ERR_BAD_PIX;
+    }
+  } else { // substrate out of bounds
+    error = ERR_BAD_SUBSTRATE;
+  }
+  return (error);
+}
+
 
