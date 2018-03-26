@@ -64,10 +64,11 @@ const byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };
 // places to store adc values
 int16_t adc0, adc1, adc2, adc3;
 
-// places to keep mcp23x17 comms variables
-uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
+
 
 void setup() {
+  // places to keep mcp23x17 comms variables
+  uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
 
   //Serial.begin(115200);
   
@@ -92,21 +93,36 @@ void setup() {
   // start the SPI library:
   SPI.begin();
 
-  mcp_dev_addr = 0x00;
-  mcp_reg_addr = 0x00; //iodirA register address
-  mcp_reg_value = 0x00; //set port A to all outputs
-  mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value);
-  
-  mcp_reg_addr = 0x01; //iodirB register address
-  mcp_reg_value = 0x00; //set port B to all outputs
-  mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value);
+  //loop through all the expanders and set their registers properly
+  for(mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr++){
+    //set HACON.HAEN
+    mcp_reg_addr = 0x0A;
+    mcp_reg_value = 0x01 << 3;
+    mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value); //probs this first one programs all the parts at once (if they just POR'd)
 
-  mcp23x17_all_off(); // shut off all 
+    mcp_reg_addr = 0x00; //iodirA register address
+    mcp_reg_value = 0x00; //set port A to all outputs
+    mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value);
+  
+    mcp_reg_addr = 0x01; //iodirB register address
+    mcp_reg_value = 0x00; //set port B to all outputs
+    mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value);
+    
+    mcp_reg_addr = 0x14; // OLATA gpio register address
+    mcp_reg_value = 0x00; // all pins low
+    mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
+
+    mcp_reg_addr = 0x15; // OLATB register address
+    mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
+  }
 }
 
 
 String cmd = "";
 void loop() {
+  // places to keep mcp23x17 comms variables
+  uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
+  
   //blink the alive pin
   digitalWrite(LED_pin, HIGH);
   delay(aliveCycleT);
@@ -133,7 +149,7 @@ void loop() {
     } else if (cmd.startsWith("s") & (cmd.length() == 3)){ //pixel select command
       int substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
       int pixel = cmd.charAt(2) - '1' ;
-      if ((substrate >= 0) & (substrate <= 7) & (pixel >= 0) & (pixel <= 7)){
+      if ((substrate >= 0) & (substrate <= 7) & (pixel >= -1) & (pixel <= 7)){
         mcp23x17_all_off();
         mcp_dev_addr = substrate;
         mcp_reg_addr = 0x14; // OLATA register address
@@ -150,6 +166,10 @@ void loop() {
         mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value);
       } else { // selection out of bounds
         ERR_MSG
+        client.print(substrate);
+        client.println("");
+        client.print(pixel);
+        client.println("");
       }
     } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
       int pd = cmd.charAt(1) - '0';
@@ -222,7 +242,7 @@ void loop() {
 }
 
 uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
-  uint8_t crtl_byte = SPI_CTRL_BYTE | SPI_READ | dev_address;
+  uint8_t crtl_byte = SPI_CTRL_BYTE | SPI_READ | dev_address << 1;
   uint8_t result = 0x00;
   
   digitalWrite(CS_PIN, LOW); //select
@@ -236,18 +256,19 @@ uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
 }
 
 void mcp23x17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
-  uint8_t crtl_byte = SPI_CTRL_BYTE | dev_address;
+  uint8_t crtl_byte = SPI_CTRL_BYTE | dev_address << 1;
   
   digitalWrite(CS_PIN, LOW); //select
   SPI.transfer(crtl_byte); // write operation
   SPI.transfer(reg_address); // iodirA register address
-  SPI.transfer(value); // read the register
+  SPI.transfer(value); // write the register
   digitalWrite(CS_PIN, HIGH); //deselect
   delay(10);
 }
 
 void mcp23x17_all_off(void){
-  for(mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr++){
+  uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
+  for(int mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr++){
     mcp_reg_addr = 0x14; // OLATA gpio register address
     mcp_reg_value = 0x00; // all pins low
     mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
