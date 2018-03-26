@@ -176,7 +176,7 @@ void loop() {
       pixSetErr = set_pix(cmd.substring(1));
       if (pixSetErr !=0){
         client.print("ERROR: Pixel selection error code ");
-        client.print(pixSetErr);
+        client.println(pixSetErr);
       }
     } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
       int pd = cmd.charAt(1) - '0';
