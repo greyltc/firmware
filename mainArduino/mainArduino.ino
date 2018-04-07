@@ -2,10 +2,13 @@
 #include <Ethernet2.h>
 //#include <MCP23S17.h>         // Here is the new class to make using the MCP23S17 easy.
 
+// socat -,rawer,echo,escape=0x03 TCP:10.42.0.54:23
+
 String const commands[][2] = {
   {"v", "diplay firmware revision"} ,
   {"adc", "adcX returns count of channel X (can be [0,3]), adc returns counts of all channels"} ,
   {"s", "sXY, selects pixel Y on substrate X, omit XY to disconnect all pixels"} ,
+  {"c", "cX, checks that MUX X is connected"} ,
   {"d", "dX selects board sense voltage divider and returns divider channel adc counts"} ,
   {"p", "pX returns photodiode X adc counts"} ,
   {"disconnect or close or logout", "ends session"} ,
@@ -23,6 +26,7 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 
 #define MCP_IODIRA_ADDR 0x00
 #define MCP_IODIRB_ADDR 0x01
+#define MCP_DEFVALA_ADDR 0x06
 #define MCP_IOCON_ADDR 0x0A
 #define MCP_OLATA_ADDR 0x14
 #define MCP_OLATB_ADDR 0x15
@@ -179,7 +183,7 @@ void loop() {
         client.println(pixSetErr);
       }
     } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
-      int pd = cmd.charAt(1) - '0';
+      uint8_t pd = cmd.charAt(1) - '0';
       if (pd == 1 | pd == 2){
           client.print("Photodiode D");
           client.print(pd);
@@ -189,8 +193,20 @@ void loop() {
       } else {
         ERR_MSG
       }
+    } else if (cmd.startsWith("c") & (cmd.length() == 2)){ //mux check command
+      uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+      if ((substrate >= 0) & (substrate <= 7)){
+        bool result = mcp23x17_MUXCheck(substrate);
+        if (result){
+          client.println("MUX OK");
+        } else {
+          client.println("MUX not found");
+        }
+      } else {
+        ERR_MSG
+      }
     } else if (cmd.startsWith("d") & (cmd.length() == 2)){ //pogo pin board sense divider measure command
-      int substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+      uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
       if ((substrate >= 0) & (substrate <= 7)){
         mcp23x17_all_off();
         mcp_dev_addr = substrate;
@@ -285,14 +301,33 @@ void mcp23x17_all_off(void){
   }
 }
 
+// checks for ability to communicate with a mux chip
+bool mcp23x17_MUXCheck(uint8_t substrate){
+  bool foundIT = false;
+  uint8_t previous = 0x00;
+  uint8_t response = 0x00;
+  static const uint8_t tester = 0b10101010;
+  previous = mcp23x17_read(substrate, MCP_DEFVALA_ADDR); //and try to read it back
+  mcp23x17_write(substrate, MCP_DEFVALA_ADDR, tester); //program the test value
+  response = mcp23x17_read(substrate, MCP_DEFVALA_ADDR); //and try to read it back
+  mcp23x17_write(substrate, MCP_DEFVALA_ADDR, previous); //revert the old value
+
+  if (response == tester){
+    foundIT = true;
+  } else {
+    foundIT = false;
+  }
+  return (foundIT);
+}
+
 int set_pix(String pix){
   int error = NO_ERROR;
   // places to keep mcp23x17 comms variables
   uint8_t mcp_dev_addr, mcp_reg_value;
   uint8_t mcp_readback_value = 0x00;
   
-  int substrate = pix.charAt(0) - 'a'; //convert a, b, c... to 0, 1, 2...
-  int pixel = pix.charAt(1) - '1' ;
+  uint8_t substrate = pix.charAt(0) - 'a'; //convert a, b, c... to 0, 1, 2...
+  uint8_t pixel = pix.charAt(1) - '1' ;
   if ((substrate >= 0) & (substrate <= 7)) {
     //mcp23x17_all_off();
     mcp_dev_addr = substrate;
