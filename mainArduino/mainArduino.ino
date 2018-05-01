@@ -327,16 +327,16 @@ int set_pix(String pix){
   uint8_t mcp_readback_value = 0x00;
   
   uint8_t substrate = pix.charAt(0) - 'a'; //convert a, b, c... to 0, 1, 2...
-  uint8_t pixel = pix.charAt(1) - '1' ;
+  uint8_t pixel = pix.charAt(1) - '0';
   if ((substrate >= 0) & (substrate <= 7)) {
     //mcp23x17_all_off();
     mcp_dev_addr = substrate;
-    if ((pixel >= -1) & (pixel <= 7)) {
-      if (pixel == 7 | pixel == 5 | pixel == 6 | pixel == 4) {
+    if ((pixel >= 0) & (pixel <= 8)) {
+      if (pixel == 8 | pixel == 6 | pixel == 7 | pixel == 5) {
         mcp_reg_value = TOP; // top bus bar connection is closer to these pixels
-      } else if (pixel == 3 | pixel == 1 | pixel == 2 | pixel == 0){
+      } else if (pixel == 4 | pixel == 2 | pixel == 3 | pixel == 1){
         mcp_reg_value = BOT; // bottom bus bar connection is closer to the rest
-      } else { // turn off portB
+      } else { // turn off portA
         mcp_reg_value = 0x00;
       }
       mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value); //enable TOP or BOT bus connection
@@ -346,10 +346,10 @@ int set_pix(String pix){
         error += ERR_SELECTION_A_DISAGREE;
       }
 
-      if (pixel == -1) {
+      if (pixel == 0) {
         mcp_reg_value = 0x00;
       } else {
-        mcp_reg_value = 0x01 << pixel;
+        mcp_reg_value = 0x01 << (pixel -1);
       }
       mcp23x17_write(mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value); //enable pixel connection
       mcp_readback_value = mcp23x17_read(mcp_dev_addr,MCP_OLATB_ADDR);
