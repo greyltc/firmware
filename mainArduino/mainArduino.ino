@@ -19,7 +19,7 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 
 #define ERR_MSG client.print("ERROR: Got bad command '"); client.print(cmd); client.println("'");
 
-#define FIRMWARE_VER "823e871"
+#define FIRMWARE_VER "471df39"
 
 #include <Wire.h>
 #include <Adafruit_ADS1015.h>
@@ -29,7 +29,6 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 #define MCP_DEFVALA_ADDR 0x06
 #define MCP_IOCON_ADDR 0x0A
 #define MCP_OLATA_ADDR 0x14
-#define MCP_OLATB_ADDR 0x15
 #define MCP_OLATB_ADDR 0x15
 
 #define MCP_SPI_CTRL_BYTE_HEADER 0x40
@@ -208,11 +207,16 @@ void loop() {
     } else if (cmd.startsWith("d") & (cmd.length() == 2)){ //pogo pin board sense divider measure command
       uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
       if ((substrate >= 0) & (substrate <= 7)){
-        mcp23x17_all_off();
+        //mcp23x17_all_off();
         mcp_dev_addr = substrate;
-        mcp_reg_addr = 0x14; // OLATA register address
-        mcp_reg_value = 1 << 2;
-        mcp23x17_write(mcp_dev_addr,mcp_reg_addr,mcp_reg_value);
+        
+        mcp_reg_addr = MCP_OLATA_ADDR; // OLATA gpio register address
+        mcp_reg_value = 1 << 2; // V_D_EN switch on
+        mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
+
+        mcp_reg_addr = MCP_OLATB_ADDR; // OLATB register address
+        mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
+        
         client.print("Board ");
         cmd.toUpperCase();
         client.print(cmd.charAt(1));
@@ -292,11 +296,11 @@ void mcp23x17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
 void mcp23x17_all_off(void){
   uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
   for(int mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr++){
-    mcp_reg_addr = 0x14; // OLATA gpio register address
+    mcp_reg_addr = MCP_OLATA_ADDR; // OLATA gpio register address
     mcp_reg_value = 0x00; // all pins low
     mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
 
-    mcp_reg_addr = 0x15; // OLATB register address
+    mcp_reg_addr = MCP_OLATB_ADDR; // OLATB register address
     mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
   }
 }
