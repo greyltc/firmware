@@ -151,6 +151,7 @@ void loop() {
   // places to keep mcp23x17 comms variables
   uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
   int pixSetErr = ERR_GENERIC;
+  uint16_t adcCounts;
   
   //blink the alive pin
   digitalWrite(LED_pin, HIGH);
@@ -207,27 +208,28 @@ void loop() {
     } else if (cmd.startsWith("d") & (cmd.length() == 2)){ //pogo pin board sense divider measure command
       uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
       if ((substrate >= 0) & (substrate <= 7)){
-        //mcp23x17_all_off();
         mcp_dev_addr = substrate;
-        
-        mcp_reg_addr = MCP_OLATA_ADDR; // OLATA gpio register address
-        mcp_reg_value = 1 << 2; // V_D_EN switch on
-        mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
 
-        mcp_reg_addr = MCP_OLATB_ADDR; // OLATB register address
-        mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
+        mcp_reg_value = mcp23x17_read(mcp_dev_addr, MCP_OLATA_ADDR); // read OLATA
+        mcp_reg_value |= (1 << 2); // flip on V_D_EN bit
+        mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+
+        adcCounts = ads.readADC_SingleEnded(0);
+
+        mcp_reg_value &= ~ (1 << 2); // flip off V_D_EN bit
+        mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
         
         client.print("Board ");
         cmd.toUpperCase();
         client.print(cmd.charAt(1));
         cmd.toLowerCase();
         client.print(" sense resistor = ");
-        client.print(ads.readADC_SingleEnded(0));
+        client.print(adcCounts);
         client.println(" counts");
       } else {
         ERR_MSG
       }
-    } else if (cmd.startsWith("adc")){ //version request command
+    } else if (cmd.startsWith("adc")){ // adc read command
       if (cmd.length() == 3){
         for(int i=0; i<=3; i++){
           client.print("AIN");
