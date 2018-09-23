@@ -85,6 +85,8 @@ int16_t adc0, adc1, adc2, adc3;
 
 uint8_t connected_devices = 0x00;
 
+SPISettings switch_spi_settings(2000000, MSBFIRST, SPI_MODE0); 
+
 void setup() {
 
   //Serial.begin(115200);
@@ -94,8 +96,9 @@ void setup() {
 
   ads.begin();
 
-  Serial.println("Getting IP via DHCP...");
-  Ethernet.begin(mac); // should call Ethernet.maintain() periodically
+  //Serial.println("Getting IP via DHCP...");
+  Ethernet.begin(mac); // TODO: should call Ethernet.maintain() periodically
+  // SPI.begin() is called in Ethernet
 
   //Serial.print("Done!\nListening for TCP connections on ");
   //Serial.print(Ethernet.localIP());
@@ -104,11 +107,9 @@ void setup() {
   //Serial.println(" ...");
   
   pinMode(LED_pin, OUTPUT); // to show we are working
-  pinMode(PE_CS_PIN, OUTPUT); // get ready to chipselect
+  
   digitalWrite(PE_CS_PIN, HIGH); //deselect
-
-  // start the SPI library
-  SPI.begin();
+  pinMode(PE_CS_PIN, OUTPUT); // get ready to chipselect
 
   // setup the port expanders
   connected_devices = setup_MCP();
@@ -273,26 +274,30 @@ void loop() {
 uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
   uint8_t crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_SPI_READ | (dev_address << 1);
   uint8_t result = 0x00;
-  
+
+  SPI.beginTransaction(switch_spi_settings);
   digitalWrite(PE_CS_PIN, LOW); //select
   SPI.transfer(crtl_byte); // write operation
   SPI.transfer(reg_address); // iodirA register address
   result = SPI.transfer(0x00); // read the register
   digitalWrite(PE_CS_PIN, HIGH); //deselect
-  delay(10);
+  SPI.endTransaction();
+  //delay(10);
 
   return(result);
 }
 
 void mcp23x17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
   uint8_t crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_SPI_WRITE | (dev_address << 1);
-  
+
+  SPI.beginTransaction(switch_spi_settings);
   digitalWrite(PE_CS_PIN, LOW); //select
   SPI.transfer(crtl_byte); // write operation
   SPI.transfer(reg_address); // iodirA register address
   SPI.transfer(value); // write the register
   digitalWrite(PE_CS_PIN, HIGH); //deselect
-  delay(10);
+  SPI.endTransaction();
+  //delay(10);
 }
 
 void mcp23x17_all_off(void){
