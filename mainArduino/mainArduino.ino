@@ -63,6 +63,7 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 
 Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
+const unsigned int HARDWARE_SPI_CS = 53; // arduino pin that goes (in hardware) with the SPI bus (must be set output)
 const unsigned int PE_CS_PIN = 48; // arduino pin for expanders chip select pin
 const unsigned int LED_pin = 13; // arduino pin for alive LED
 const unsigned int aliveCycleT = 100; //ms
@@ -85,7 +86,7 @@ int16_t adc0, adc1, adc2, adc3;
 
 uint8_t connected_devices = 0x00;
 
-SPISettings switch_spi_settings(2000000, MSBFIRST, SPI_MODE0); 
+SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0); 
 
 void setup() {
 
@@ -116,6 +117,11 @@ void setup() {
 }
 
 uint8_t setup_MCP(void){
+  // pulse CS to clear out weirdness from startup
+  digitalWrite(PE_CS_PIN, LOW); //select
+  delayMicroseconds(1);
+  digitalWrite(PE_CS_PIN, HIGH); //deselect
+  
   // places to keep mcp23x17 comms variables
   volatile uint8_t mcp_dev_addr, mcp_reg_value;
   volatile uint8_t connected_devices_mask = 0x00;
@@ -277,10 +283,13 @@ uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
 
   SPI.beginTransaction(switch_spi_settings);
   digitalWrite(PE_CS_PIN, LOW); //select
+  delayMicroseconds(1);
   SPI.transfer(crtl_byte); // write operation
   SPI.transfer(reg_address); // iodirA register address
   result = SPI.transfer(0x00); // read the register
+  delayMicroseconds(1);
   digitalWrite(PE_CS_PIN, HIGH); //deselect
+  delayMicroseconds(1);
   SPI.endTransaction();
   //delay(10);
 
@@ -292,10 +301,13 @@ void mcp23x17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
 
   SPI.beginTransaction(switch_spi_settings);
   digitalWrite(PE_CS_PIN, LOW); //select
+  delayMicroseconds(1);
   SPI.transfer(crtl_byte); // write operation
   SPI.transfer(reg_address); // iodirA register address
   SPI.transfer(value); // write the register
+  delayMicroseconds(1);
   digitalWrite(PE_CS_PIN, HIGH); //deselect
+  delayMicroseconds(1);
   SPI.endTransaction();
   //delay(10);
 }
