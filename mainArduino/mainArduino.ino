@@ -1,4 +1,4 @@
-#include <SPI.h>
+//#include <SPI.h>
 #include <Ethernet2.h>
 //#include <MCP23S17.h>         // Here is the new class to make using the MCP23S17 easy.
 
@@ -64,8 +64,15 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
 const unsigned int HARDWARE_SPI_CS = 53; // arduino pin that goes (in hardware) with the SPI bus (must be set output)
-const unsigned int PE_CS_PIN = 48; // arduino pin for expanders chip select pin
 const unsigned int LED_pin = 13; // arduino pin for alive LED
+
+// port expander software SPI bus pin definitions
+const unsigned int PE_CS_PIN = 22; // arduino pin for expanders chip select pin
+const unsigned int PE_MOSI_PIN = 25; // arduino pin for SPI bus for port expanders
+const unsigned int PE_MISO_PIN = 24; // arduino pin for SPI bus for port expanders
+const unsigned int PE_SCK_PIN = 26; // arduino pin for SPI bus for port expanders
+
+
 const unsigned int aliveCycleT = 100; //ms
 const unsigned int serverPort = 23;
 
@@ -86,9 +93,23 @@ int16_t adc0, adc1, adc2, adc3;
 
 uint8_t connected_devices = 0x00;
 
-SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0); 
+//SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
 
 void setup() {
+
+  digitalWrite(HARDWARE_SPI_CS, HIGH); //deselect
+  pinMode(HARDWARE_SPI_CS, OUTPUT);
+
+  digitalWrite(PE_CS_PIN, HIGH); //deselect
+  pinMode(PE_CS_PIN, OUTPUT); // get ready to chipselect
+
+  digitalWrite(PE_SCK_PIN, LOW); //clock starts low
+  pinMode(PE_SCK_PIN, OUTPUT);
+
+  digitalWrite(PE_MOSI_PIN, LOW); //data starts low
+  pinMode(PE_MOSI_PIN, OUTPUT);
+  
+  pinMode(PE_MISO_PIN, INPUT);
 
   //Serial.begin(115200);
   
@@ -109,10 +130,10 @@ void setup() {
   
   pinMode(LED_pin, OUTPUT); // to show we are working
   
-  digitalWrite(PE_CS_PIN, HIGH); //deselect
-  pinMode(PE_CS_PIN, OUTPUT); // get ready to chipselect
+
 
   // setup the port expanders
+  
   connected_devices = setup_MCP();
 }
 
@@ -281,17 +302,19 @@ uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
   uint8_t crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_SPI_READ | (dev_address << 1);
   uint8_t result = 0x00;
 
-  SPI.beginTransaction(switch_spi_settings);
   digitalWrite(PE_CS_PIN, LOW); //select
-  delayMicroseconds(1);
-  SPI.transfer(crtl_byte); // write operation
-  SPI.transfer(reg_address); // iodirA register address
-  result = SPI.transfer(0x00); // read the register
-  delayMicroseconds(1);
+  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, crtl_byte);
+  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
+  result = shiftIn(PE_MISO_PIN, PE_SCK_PIN, MSBFIRST);
   digitalWrite(PE_CS_PIN, HIGH); //deselect
-  delayMicroseconds(1);
-  SPI.endTransaction();
-  //delay(10);
+
+  //SPI.beginTransaction(switch_spi_settings);
+  //digitalWrite(PE_CS_PIN, LOW); //select
+  //SPI.transfer(crtl_byte); // write operation
+  //SPI.transfer(reg_address); // iodirA register address
+  //result = SPI.transfer(0x00); // read the register
+  //digitalWrite(PE_CS_PIN, HIGH); //deselect
+  //SPI.endTransaction();
 
   return(result);
 }
@@ -299,16 +322,19 @@ uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
 void mcp23x17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
   uint8_t crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_SPI_WRITE | (dev_address << 1);
 
-  SPI.beginTransaction(switch_spi_settings);
   digitalWrite(PE_CS_PIN, LOW); //select
-  delayMicroseconds(1);
-  SPI.transfer(crtl_byte); // write operation
-  SPI.transfer(reg_address); // iodirA register address
-  SPI.transfer(value); // write the register
-  delayMicroseconds(1);
+  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, crtl_byte);
+  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
+  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, value);
   digitalWrite(PE_CS_PIN, HIGH); //deselect
-  delayMicroseconds(1);
-  SPI.endTransaction();
+
+  //SPI.beginTransaction(switch_spi_settings);
+  //digitalWrite(PE_CS_PIN, LOW); //select
+  //SPI.transfer(crtl_byte); // write operation
+  //SPI.transfer(reg_address); // iodirA register address
+  //SPI.transfer(value); // send new value
+  //digitalWrite(PE_CS_PIN, HIGH); //deselect
+  //SPI.endTransaction();
   //delay(10);
 }
 
