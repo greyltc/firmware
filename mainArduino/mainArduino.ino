@@ -1,9 +1,11 @@
+#define FIRMWARE_VER "97bc6a7"
+
 #include <Ethernet2.h>
 //#include <MCP23S17.h>         // Here is the new class to make using the MCP23S17 easy.
 
 // when this is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
-//#define BIT_BANG_SPI
+#define BIT_BANG_SPI
  
 # ifndef BIT_BANG_SPI
 # include <SPI.h>
@@ -26,7 +28,7 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 
 #define ERR_MSG client.print("ERROR: Got bad command '"); client.print(cmd); client.println("'");
 
-#define FIRMWARE_VER "e3a6923"
+
 
 #include <Wire.h>
 #include <Adafruit_ADS1015.h>
