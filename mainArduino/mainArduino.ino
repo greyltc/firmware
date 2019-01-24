@@ -1,11 +1,11 @@
 #define FIRMWARE_VER "97bc6a7"
 
-#include <Ethernet2.h>
+#include <Ethernet.h>
 //#include <MCP23S17.h>         // Here is the new class to make using the MCP23S17 easy.
 
 // when this is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
-#define BIT_BANG_SPI
+//#define BIT_BANG_SPI
  
 # ifndef BIT_BANG_SPI
 # include <SPI.h>
@@ -98,7 +98,7 @@ EthernetServer server(serverPort);
 
 
 // the media access control (ethernet hardware) address for the shield:
-const byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };  
+const byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };
 
 // places to store adc values
 int16_t adc0, adc1, adc2, adc3;
