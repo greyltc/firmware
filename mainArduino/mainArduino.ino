@@ -1,4 +1,4 @@
-#define FIRMWARE_VER "97bc6a7"
+#define FIRMWARE_VER "9661970"
 
 #include <Ethernet.h>
 //#include <MCP23S17.h>         // Here is the new class to make using the MCP23S17 easy.
