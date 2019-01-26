@@ -31,7 +31,7 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 
 
 #include <Wire.h>
-#include <Adafruit_ADS1015.h>
+//#include <Adafruit_ADS1015.h>
 
 #define MCP_IODIRA_ADDR 0x00
 #define MCP_IODIRB_ADDR 0x01
@@ -70,7 +70,7 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 #define BOT 0x02
 #define V_D_EN 0x04
 
-Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
+//Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
 const unsigned int HARDWARE_SPI_CS = 53; // arduino pin that goes (in hardware) with the SPI bus (must be set output)
 const unsigned int LED_pin = 13; // arduino pin for alive LED
@@ -127,16 +127,28 @@ void setup() {
   pinMode(PE_MISO_PIN, INPUT);
   #endif
 
-  //Serial.begin(115200);
+  Serial.begin(115200);
   
   //Serial.println("Getting single-ended readings from AIN0..3");
   //Serial.println("ADC Range: +/- 6.144V (1 bit = 3mV/ADS1015, 0.1875mV/ADS1115)");
 
-  ads.begin();
+  //ads.begin();
+
+  //ADS122C04
+  #define CURRENT_ADS122C04_ADDRESS 0x41
+  #define VOLTAGE_ADS122C04_ADDRESS 0x40
+  #define ADS122C04_RESET_CODE 0x06
+  #define ADS122C04_STARTSYNC_CODE 0x08
+  #define ADS122C04_POWERDOWN_CODE 0x02
+  #define ADS122C04_RDATA_CODE 0x10
+  #define ADS122C04_RREG_CODE 0x20
+  #define ADS122C04_WREG_CODE 0x40
+  #define ADS122C04_CONVERSION_TIME 51 //for the defaults: normal mode, 20 samples/sec with 0.99ms buffer 
+
+  Wire.begin();
 
   //Serial.println("Getting IP via DHCP...");
   Ethernet.begin(mac); // TODO: should call Ethernet.maintain() periodically
-  // SPI.begin() is called in Ethernet
 
   //Serial.print("Done!\nListening for TCP connections on ");
   //Serial.print(Ethernet.localIP());
@@ -145,12 +157,133 @@ void setup() {
   //Serial.println(" ...");
   
   pinMode(LED_pin, OUTPUT); // to show we are working
-  
 
+  ads_reset(true);
+  
+  while(true){
+    Serial.println(ads_get_d1());
+    //Serial.println(ads_check_supply(true));
+  }
 
   // setup the port expanders
-  
   connected_devices = setup_MCP();
+}
+
+// ads check analog voltage range
+uint32_t ads_check_supply(bool current_adc){
+  ads_reset(true);
+  ads_write(true, 0x00, B11010000); // mux set for analog range/4
+  return(ads_single_shot(true));
+}
+
+// get diode 1 counts
+uint32_t ads_get_d1(void){
+  ads_reset(true);
+  ads_write(true, 0, B10100000); //ain2 to avss on mux
+  //ads_write(true, 1, B00000100); //v ref is full scale analog range
+  
+  return(ads_single_shot(true));
+}
+
+// get diode 2 counts
+uint32_t ads_get_d2(void){
+  ads_reset(true);
+  ads_write(true, 0, B10110000); //ain3 to avss on mux
+  //ads_write(true, 1, B00000100); //v ref is full scale analog range
+  return(ads_single_shot(true));
+}
+
+// make a single shot reading
+uint32_t ads_single_shot(bool current_adc){
+  ads_start_sync(current_adc);
+  delay(ADS122C04_CONVERSION_TIME);
+  return(ads_get_data(current_adc));
+}
+
+//reset the adc
+void ads_reset(bool current_adc){
+  uint8_t address;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(ADS122C04_RESET_CODE);
+  Wire.endTransmission();
+}
+
+//send the START/SYNC command
+void ads_start_sync(bool current_adc){
+  uint8_t address;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(ADS122C04_STARTSYNC_CODE);
+  Wire.endTransmission();
+}
+
+//get latest adc counts
+uint32_t ads_get_data(bool current_adc){
+  uint32_t data = 0x00000000;
+  uint8_t address;
+  
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  
+  Wire.beginTransmission(address);
+  Wire.write(ADS122C04_RDATA_CODE);
+  Wire.endTransmission();
+  Wire.requestFrom(address, 3);
+  data =  Wire.read();
+  data =  data << 8;
+  data |= Wire.read();
+  data =  data << 8;
+  data |= Wire.read();
+  
+  return(data);
+}
+
+//program a register
+void ads_write(bool current_adc, uint8_t reg, uint8_t value){
+  uint8_t address;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(((reg & 0x03)<<2)|ADS122C04_WREG_CODE);
+  Wire.write(value);
+  Wire.endTransmission();
+}
+
+//read a register value
+uint8_t ads_read(bool current_adc, uint8_t reg){
+  uint8_t reg_value;
+  uint8_t address;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(((reg & 0x03)<<2)|ADS122C04_RREG_CODE);
+  Wire.endTransmission();
+  Wire.requestFrom(address, 1);
+  reg_value = Wire.read();
+  return(reg_value);
 }
 
 uint8_t setup_MCP(void){
@@ -232,7 +365,7 @@ void loop() {
           client.print("Photodiode D");
           client.print(pd);
           client.print(" = ");
-          client.print(ads.readADC_SingleEnded(pd+1));
+          client.print("DONK");
           client.println(" counts");
       } else {
         ERR_MSG
@@ -258,7 +391,7 @@ void loop() {
         mcp_reg_value |= (1 << 2); // flip on V_D_EN bit
         mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
 
-        adcCounts = ads.readADC_SingleEnded(0);
+        //adcCounts = ads.readADC_SingleEnded(0);
 
         mcp_reg_value &= ~ (1 << 2); // flip off V_D_EN bit
         mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
@@ -279,7 +412,7 @@ void loop() {
           client.print("AIN");
           client.print(i);
           client.print("= ");
-          client.print(ads.readADC_SingleEnded(i));
+          client.print("DONK");
           client.println(" counts");  
         }
       } else if (cmd.length() == 4){
@@ -288,7 +421,7 @@ void loop() {
           client.print("AIN");
           client.print(chan);
           client.print("= ");
-          client.print(ads.readADC_SingleEnded(chan));
+          client.print("DONK");
           client.println(" counts");
         } else {
           ERR_MSG
