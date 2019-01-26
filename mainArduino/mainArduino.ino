@@ -1,26 +1,33 @@
 #define FIRMWARE_VER "753ffac"
 
 #include <Ethernet.h>
-//#include <MCP23S17.h>         // Here is the new class to make using the MCP23S17 easy.
 
-// when this is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
+// when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
-#define BIT_BANG_SPI
+//#define BIT_BANG_SPI
  
 # ifndef BIT_BANG_SPI
 # include <SPI.h>
 #endif
 
+#include <Wire.h>
+
+// when DEBUG is defined, a serial comms interface will be brought up over USB and prints out some debug info
+//#define DEBUG
+
+// do this to enter the control interface:
 // socat -,rawer,echo,escape=0x03 TCP:10.42.0.54:23
 
+// help
 String const commands[][2] = {
   {"v", "diplay firmware revision"} ,
-  {"adc", "adcX returns count of channel X (can be [0,3]), adc returns counts of all channels"} ,
-  {"s", "sXY, selects pixel Y on substrate X, omit XY to disconnect all pixels"} ,
-  {"c", "cX, checks that MUX X is connected"} ,
-  {"d", "dX selects board sense voltage divider and returns divider channel adc counts"} ,
-  {"p", "pX returns photodiode X adc counts"} ,
-  {"disconnect or close or logout", "ends session"} ,
+  {"adc", "\"adcX\" returns count of channel X (can be [0,7]), just \"adc\" returns counts of all channels"} ,
+  {"s", "\"sXY\", selects pixel Y on substrate X, just \"s\" disconnects all pixels"} ,
+  {"c", "\"cX\", checks that MUX X is connected"} ,
+  {"d", "\"dX\" selects board X's type indicator resistor and returns associated adc counts"} ,
+  {"p", "\"pX\" returns photodiode X's adc counts"} ,
+  {"a", "\"a\" returns the analog voltage supply span as read by each of the adcs"} ,
+  {"disconnect or close or logout or exit or quit", "ends session"} ,
   {"? or help", "print this help"}
 };
 
@@ -30,9 +37,19 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 
 
 
-#include <Wire.h>
-//#include <Adafruit_ADS1015.h>
+//ADS122C04 definitions
+#define CURRENT_ADS122C04_ADDRESS 0x41
+#define VOLTAGE_ADS122C04_ADDRESS 0x40
+#define ADS122C04_RESET_CODE 0x06
+#define ADS122C04_STARTSYNC_CODE 0x08
+#define ADS122C04_POWERDOWN_CODE 0x02
+#define ADS122C04_RDATA_CODE 0x10
+#define ADS122C04_RREG_CODE 0x20
+#define ADS122C04_WREG_CODE 0x40
+#define ADS122C04_INTERNAL_REF 2.048
+#define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, 20 samples/sec, with 0.99ms headroom 
 
+//some definitions for the MCP23S17
 #define MCP_IODIRA_ADDR 0x00
 #define MCP_IODIRB_ADDR 0x01
 #define MCP_DEFVALA_ADDR 0x06
@@ -44,7 +61,7 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 #define MCP_SPI_READ 0x01
 #define MCP_SPI_WRITE 0x00
 
-// ERRORS
+// error definitions
 #define NO_ERROR 0
 #define ERR_BAD_PIX -1 //pixel selection out of bounds
 #define ERR_BAD_SUBSTRATE -2 //substrate selection out of bounds
@@ -70,8 +87,6 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 #define BOT 0x02
 #define V_D_EN 0x04
 
-//Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
-
 const unsigned int HARDWARE_SPI_CS = 53; // arduino pin that goes (in hardware) with the SPI bus (must be set output)
 const unsigned int LED_pin = 13; // arduino pin for alive LED
 
@@ -85,23 +100,11 @@ const unsigned int PE_SCK_PIN = 26; // arduino pin for SPI bus for port expander
 const unsigned int PE_CS_PIN = 48; // arduino pin for expanders chip select pin
 #endif
 
-const unsigned int aliveCycleT = 100; //ms
-const unsigned int serverPort = 23;
-
-//MCP inputchip(1, 10);             // Instantiate an object called "inputchip" on an MCP23S17 device at address 1
-  								  // and slave-select on Arduino pin 10
-//MCP outputchip(EXP_ADDR, CS_PIN);            // Instantiate an object called "outputchip" on an MCP23S17 device at address 0
-  								  // and slave-select on Arduino pin 4
-
-// setup telnet server
-EthernetServer server(serverPort);
-
+const unsigned int aliveCycleT = 100; // [ms]
+const unsigned int serverPort = 23; // telnet port
 
 // the media access control (ethernet hardware) address for the shield:
 const byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };
-
-// places to store adc values
-int16_t adc0, adc1, adc2, adc3;
 
 uint8_t connected_devices = 0x00;
 
@@ -109,8 +112,10 @@ uint8_t connected_devices = 0x00;
 SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
 #endif
 
-void setup() {
+// setup telnet server
+EthernetServer server(serverPort);
 
+void setup() {
   digitalWrite(HARDWARE_SPI_CS, HIGH); //deselect
   pinMode(HARDWARE_SPI_CS, OUTPUT);
 
@@ -127,208 +132,44 @@ void setup() {
   pinMode(PE_MISO_PIN, INPUT);
   #endif
 
-  Serial.begin(115200);
-  
-  //Serial.println("Getting single-ended readings from AIN0..3");
-  //Serial.println("ADC Range: +/- 6.144V (1 bit = 3mV/ADS1015, 0.1875mV/ADS1115)");
+  #ifdef DEBUG
+  Serial.begin(115200); // serial port for debugging  
+  #endif
 
-  //ads.begin();
+  Wire.begin(); // for I2C
 
-  //ADS122C04
-  #define CURRENT_ADS122C04_ADDRESS 0x41
-  #define VOLTAGE_ADS122C04_ADDRESS 0x40
-  #define ADS122C04_RESET_CODE 0x06
-  #define ADS122C04_STARTSYNC_CODE 0x08
-  #define ADS122C04_POWERDOWN_CODE 0x02
-  #define ADS122C04_RDATA_CODE 0x10
-  #define ADS122C04_RREG_CODE 0x20
-  #define ADS122C04_WREG_CODE 0x40
-  #define ADS122C04_CONVERSION_TIME 51 //for the defaults: normal mode, 20 samples/sec with 0.99ms buffer 
+  #ifdef DEBUG
+  Serial.println("Getting IP via DHCP...");
+  #endif
+  Ethernet.begin(mac); // TODO: should call Ethernet.maintain() periodically, but in every loop is overkill
 
-  Wire.begin();
-
-  //Serial.println("Getting IP via DHCP...");
-  Ethernet.begin(mac); // TODO: should call Ethernet.maintain() periodically
-
-  //Serial.print("Done!\nListening for TCP connections on ");
-  //Serial.print(Ethernet.localIP());
-  //Serial.print(":");
-  //Serial.print(serverPort);
-  //Serial.println(" ...");
+  #ifdef DEBUG
+  Serial.print("Done!\nListening for TCP connections on ");
+  Serial.print(Ethernet.localIP());
+  Serial.print(":");
+  Serial.print(serverPort);
+  Serial.println(" ...");
+  #endif
   
   pinMode(LED_pin, OUTPUT); // to show we are working
 
-  ads_reset(true);
-  
-  while(true){
-    Serial.println(ads_get_d1());
-    //Serial.println(ads_check_supply(true));
-  }
+  delayMicroseconds(500); // wait to ensure the adc has finished powering up
+  ads_reset(true); // reset the current adc
+  ads_reset(false); // reset the voltage adc
 
   // setup the port expanders
   connected_devices = setup_MCP();
 }
 
-// ads check analog voltage range
-uint32_t ads_check_supply(bool current_adc){
-  ads_reset(true);
-  ads_write(true, 0x00, B11010000); // mux set for analog range/4
-  return(ads_single_shot(true));
-}
+// define some various varibles we'll use in the loop
+volatile uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
+volatile int pixSetErr = ERR_GENERIC;
+volatile int32_t adcCounts;
 
-// get diode 1 counts
-uint32_t ads_get_d1(void){
-  ads_reset(true);
-  ads_write(true, 0, B10100000); //ain2 to avss on mux
-  //ads_write(true, 1, B00000100); //v ref is full scale analog range
-  
-  return(ads_single_shot(true));
-}
-
-// get diode 2 counts
-uint32_t ads_get_d2(void){
-  ads_reset(true);
-  ads_write(true, 0, B10110000); //ain3 to avss on mux
-  //ads_write(true, 1, B00000100); //v ref is full scale analog range
-  return(ads_single_shot(true));
-}
-
-// make a single shot reading
-uint32_t ads_single_shot(bool current_adc){
-  ads_start_sync(current_adc);
-  delay(ADS122C04_CONVERSION_TIME);
-  return(ads_get_data(current_adc));
-}
-
-//reset the adc
-void ads_reset(bool current_adc){
-  uint8_t address;
-  if (current_adc) {
-    address = CURRENT_ADS122C04_ADDRESS;
-    
-  } else {
-    address = VOLTAGE_ADS122C04_ADDRESS;
-  }
-  Wire.beginTransmission(address);
-  Wire.write(ADS122C04_RESET_CODE);
-  Wire.endTransmission();
-}
-
-//send the START/SYNC command
-void ads_start_sync(bool current_adc){
-  uint8_t address;
-  if (current_adc) {
-    address = CURRENT_ADS122C04_ADDRESS;
-    
-  } else {
-    address = VOLTAGE_ADS122C04_ADDRESS;
-  }
-  Wire.beginTransmission(address);
-  Wire.write(ADS122C04_STARTSYNC_CODE);
-  Wire.endTransmission();
-}
-
-//get latest adc counts
-uint32_t ads_get_data(bool current_adc){
-  uint32_t data = 0x00000000;
-  uint8_t address;
-  
-  if (current_adc) {
-    address = CURRENT_ADS122C04_ADDRESS;
-    
-  } else {
-    address = VOLTAGE_ADS122C04_ADDRESS;
-  }
-  
-  Wire.beginTransmission(address);
-  Wire.write(ADS122C04_RDATA_CODE);
-  Wire.endTransmission();
-  Wire.requestFrom(address, 3);
-  data =  Wire.read();
-  data =  data << 8;
-  data |= Wire.read();
-  data =  data << 8;
-  data |= Wire.read();
-  
-  return(data);
-}
-
-//program a register
-void ads_write(bool current_adc, uint8_t reg, uint8_t value){
-  uint8_t address;
-  if (current_adc) {
-    address = CURRENT_ADS122C04_ADDRESS;
-    
-  } else {
-    address = VOLTAGE_ADS122C04_ADDRESS;
-  }
-  Wire.beginTransmission(address);
-  Wire.write(((reg & 0x03)<<2)|ADS122C04_WREG_CODE);
-  Wire.write(value);
-  Wire.endTransmission();
-}
-
-//read a register value
-uint8_t ads_read(bool current_adc, uint8_t reg){
-  uint8_t reg_value;
-  uint8_t address;
-  if (current_adc) {
-    address = CURRENT_ADS122C04_ADDRESS;
-    
-  } else {
-    address = VOLTAGE_ADS122C04_ADDRESS;
-  }
-  Wire.beginTransmission(address);
-  Wire.write(((reg & 0x03)<<2)|ADS122C04_RREG_CODE);
-  Wire.endTransmission();
-  Wire.requestFrom(address, 1);
-  reg_value = Wire.read();
-  return(reg_value);
-}
-
-uint8_t setup_MCP(void){
-  // pulse CS to clear out weirdness from startup
-  digitalWrite(PE_CS_PIN, LOW); //select
-  delayMicroseconds(1);
-  digitalWrite(PE_CS_PIN, HIGH); //deselect
-  
-  // places to keep mcp23x17 comms variables
-  volatile uint8_t mcp_dev_addr, mcp_reg_value;
-  volatile uint8_t connected_devices_mask = 0x00;
-  
-  //loop through all the expanders and set their registers properly
-  for (mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr ++){
-    
-    //probs this first one programs all the parts at once (if they just POR'd)
-    mcp_reg_value = 0x08; //set IOCON --> HACON.HAEN
-    mcp23x17_write(mcp_dev_addr, MCP_IOCON_ADDR, mcp_reg_value);
-
-    mcp_reg_value = 0x00; // PORTA out low
-    mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
-
-    mcp_reg_value = 0x00; // PORTB out low
-    mcp23x17_write(mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value);
-
-    mcp_reg_value = 0x00; //all of PORTA to are outputs
-    mcp23x17_write(mcp_dev_addr, MCP_IODIRA_ADDR, mcp_reg_value);
-  
-    mcp_reg_value = 0x00; //all of PORTB to are outputs
-    mcp23x17_write(mcp_dev_addr, MCP_IODIRB_ADDR, mcp_reg_value);
-
-    mcp_reg_value = mcp23x17_read(mcp_dev_addr, MCP_IOCON_ADDR);
-    if (mcp_reg_value == 0x08) { //IOCON --> HACON.HAEN should be set
-      connected_devices_mask |= 0x01 << mcp_dev_addr;
-    }
-  }
-  return (connected_devices);
-}
 
 String cmd = "";
 void loop() {
-  // places to keep mcp23x17 comms variables
-  uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
-  int pixSetErr = ERR_GENERIC;
-  uint16_t adcCounts;
+  pixSetErr = ERR_GENERIC;
   
   //blink the alive pin
   digitalWrite(LED_pin, HIGH);
@@ -351,6 +192,13 @@ void loop() {
     } else if (cmd.equals("v")){ //version request command
       client.print("Firmware Version: ");
       client.println(FIRMWARE_VER);
+    } else if (cmd.equals("a")){ //analog voltage supply span command
+      client.print("Analog voltage span as read by U2 (current adc): ");
+      client.print(ads_check_supply(true),6);
+      client.println("V");
+      client.print("Analog voltage span as read by U5 (voltage adc): ");
+      client.print(ads_check_supply(false),6);
+      client.println("V");
     } else if (cmd.equals("s")){ //pixel deselect command
       mcp23x17_all_off();
     } else if (cmd.startsWith("s") & (cmd.length() == 3)){ //pixel select command
@@ -365,7 +213,7 @@ void loop() {
           client.print("Photodiode D");
           client.print(pd);
           client.print(" = ");
-          client.print("DONK");
+          client.print(ads_get_single_ended(true,pd+1));
           client.println(" counts");
       } else {
         ERR_MSG
@@ -391,7 +239,7 @@ void loop() {
         mcp_reg_value |= (1 << 2); // flip on V_D_EN bit
         mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
 
-        //adcCounts = ads.readADC_SingleEnded(0);
+        adcCounts = ads_get_resistor();
 
         mcp_reg_value &= ~ (1 << 2); // flip off V_D_EN bit
         mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
@@ -407,21 +255,40 @@ void loop() {
         ERR_MSG
       }
     } else if (cmd.startsWith("adc")){ // adc read command
-      if (cmd.length() == 3){
-        for(int i=0; i<=3; i++){
-          client.print("AIN");
-          client.print(i);
-          client.print("= ");
-          client.print("DONK");
-          client.println(" counts");  
+      if (cmd.length() == 3){ //list all of the channels' counts
+        for(int i=0; i<=7; i++){
+          if ((i >= 0) & (i <= 3)){
+            client.print("AIN");
+            client.print(i);
+            client.print(" (U2, current adc, channel ");
+            client.print(i);
+            client.print(") = ");
+            client.print(ads_get_single_ended(true,i));
+            client.println(" counts");
+          }
+          if ((i >= 4) & (i <= 7)){
+            client.print("AIN");
+            client.print(i);
+            client.print(" (U5, voltage adc, channel ");
+            client.print(i-4);
+            client.print(") = ");
+            client.print(ads_get_single_ended(false,i-4));
+            client.println(" counts");
+          }
         }
       } else if (cmd.length() == 4){
-        int chan = cmd.charAt(3) - '0';
-        if ((chan >= 0) & (chan <= 3)){
+        int chan = cmd.charAt(3) - '0'; // 0-3 are mapped to U2's (current adc) chans AIN0-3, 4-7 are mapped to U5's (voltage adc) chans AIN0-3
+        if ((chan >= 0) & (chan <= 3)){  
           client.print("AIN");
           client.print(chan);
           client.print("= ");
-          client.print("DONK");
+          client.print(ads_get_single_ended(true,chan));
+          client.println(" counts");
+        } else if ((chan >= 4) & (chan <= 7)) {
+          client.print("AIN");
+          client.print(chan);
+          client.print("= ");
+          client.print(ads_get_single_ended(false,chan-4));
           client.println(" counts");
         } else {
           ERR_MSG
@@ -436,7 +303,7 @@ void loop() {
         client.print(": ");
         client.println(commands[i][1]);
       }
-    } else if (cmd.equals("close") | cmd.equals("disconnect") | cmd.equals("logout")){ //logout
+    } else if (cmd.equals("exit") | cmd.equals("close") | cmd.equals("disconnect") | cmd.equals("quit") | cmd.equals("logout")){ //logout
       client.println("Goodbye");
       client.stop();
     } else { //bad command
@@ -560,4 +427,191 @@ int set_pix(String pix){
     error = ERR_BAD_SUBSTRATE;
   }
   return (error);
+}
+
+// check analog voltage range
+float ads_check_supply(bool current_adc){
+  float data = 0;
+  if( ads_reset(current_adc) == 0){
+    if (ads_write(true, 0, B1101<<4) == 0){ // mux set for analog range/4
+      data = 4.0*(ads_single_shot(current_adc)*ADS122C04_INTERNAL_REF)/pow(2,23);
+    }
+  }
+  return(data);
+}
+
+// get gain configuration for ads
+int ads_get_gain(bool current_adc){
+  uint8_t reg0 = ads_read(current_adc, 0);
+  reg0 &= 0x0E;
+  reg0 = reg0 >> 1;
+  return(((int)reg0) + 1);
+}
+
+// get channel adc reading with respect to AVSS
+int32_t ads_get_single_ended(bool current_adc, int channel){
+  int32_t reading = 0;
+
+  if ((channel >= 0) & (channel <= 3)){
+    if (ads_reset(current_adc) == 0){
+      ads_write(current_adc, 0, (0x08|channel) << 4);
+      reading = ads_single_shot(current_adc);
+    }
+  }
+  return (reading);
+}
+
+// get adapter board resistor counts
+int32_t ads_get_resistor(void){
+  int32_t reading = 0;
+  if( ads_reset(true) == 0) {
+    ads_write(true, 0, B1000<<4); //ain0 to avss on mux
+    ads_write(true, 2, B100<<0); //set IDACs to 250uA
+    ads_write(true, 3, B001<<5); //connect IDAC1 to AIN0
+    //ads_write(true, 1, B00000100); //v ref is full scale analog range
+    reading = ads_single_shot(true);
+    ads_reset(true); // reset now because we don't want that current source to be connected to unexpected places later
+  }
+  return(reading);
+}
+
+// make a single shot reading
+int32_t ads_single_shot(bool current_adc){
+  int32_t reading = 0;
+  if (ads_start_sync(current_adc) == 0){
+    delay(ADS122C04_CONVERSION_TIME);
+    reading = ads_get_data(current_adc);
+  }
+  return(reading);
+}
+
+//reset the adc
+uint8_t ads_reset(bool current_adc){
+  uint8_t address;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(ADS122C04_RESET_CODE);
+  return(Wire.endTransmission());
+}
+
+//send the START/SYNC command
+uint8_t ads_start_sync(bool current_adc){
+  uint8_t address;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(ADS122C04_STARTSYNC_CODE);
+  return(Wire.endTransmission());
+}
+
+//get latest adc counts
+int32_t ads_get_data(bool current_adc){
+  int32_t data = 0;
+  uint32_t data_storage = 0x00000000;
+  uint8_t address;
+  uint8_t transmission_status;
+  
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  
+  Wire.beginTransmission(address);
+  Wire.write(ADS122C04_RDATA_CODE);
+  if (Wire.endTransmission(false) == 0){
+    Wire.requestFrom(address, (uint8_t)3);
+    data_storage =  Wire.read();
+    data_storage =  data_storage << 8;
+    data_storage |= Wire.read();
+    data_storage =  data_storage << 8;
+    data_storage |= Wire.read();
+    data_storage = data_storage << 8;
+    data = (int32_t) data_storage;
+    data = data >> 8;
+  }
+  return(data);
+}
+
+//program a register
+uint8_t ads_write(bool current_adc, uint8_t reg, uint8_t value){
+  uint8_t address;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(((reg & 0x03)<<2)|ADS122C04_WREG_CODE);
+  Wire.write(value);
+  return(Wire.endTransmission());
+}
+
+//read a register value
+uint8_t ads_read(bool current_adc, uint8_t reg){
+  uint8_t reg_value = 0x00;
+  uint8_t address;
+  uint8_t transmission_status;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(((reg & 0x03)<<2)|ADS122C04_RREG_CODE);
+  if (Wire.endTransmission(false) == 0){ // TODO: impossible to tell the difference between a NAK and 0x00 register value :-(
+    Wire.requestFrom(address, (uint8_t)1);
+    reg_value = Wire.read();
+  }
+
+  return(reg_value);
+}
+
+uint8_t setup_MCP(void){
+  // pulse CS to clear out weirdness from startup
+  digitalWrite(PE_CS_PIN, LOW); //select
+  delayMicroseconds(1);
+  digitalWrite(PE_CS_PIN, HIGH); //deselect
+  
+  // places to keep mcp23x17 comms variables
+  volatile uint8_t mcp_dev_addr, mcp_reg_value;
+  volatile uint8_t connected_devices_mask = 0x00;
+  
+  //loop through all the expanders and set their registers properly
+  for (mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr ++){
+    
+    //probs this first one programs all the parts at once (if they just POR'd)
+    mcp_reg_value = 0x08; //set IOCON --> HACON.HAEN
+    mcp23x17_write(mcp_dev_addr, MCP_IOCON_ADDR, mcp_reg_value);
+
+    mcp_reg_value = 0x00; // PORTA out low
+    mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+
+    mcp_reg_value = 0x00; // PORTB out low
+    mcp23x17_write(mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value);
+
+    mcp_reg_value = 0x00; //all of PORTA to are outputs
+    mcp23x17_write(mcp_dev_addr, MCP_IODIRA_ADDR, mcp_reg_value);
+  
+    mcp_reg_value = 0x00; //all of PORTB to are outputs
+    mcp23x17_write(mcp_dev_addr, MCP_IODIRB_ADDR, mcp_reg_value);
+
+    mcp_reg_value = mcp23x17_read(mcp_dev_addr, MCP_IOCON_ADDR);
+    if (mcp_reg_value == 0x08) { //IOCON --> HACON.HAEN should be set
+      connected_devices_mask |= 0x01 << mcp_dev_addr;
+    }
+  }
+  return (connected_devices);
 }
