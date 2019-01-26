@@ -1,4 +1,4 @@
-#define FIRMWARE_VER "753ffac"
+#define FIRMWARE_VER "7c0838d"
 
 #include <Ethernet.h>
 
@@ -537,7 +537,7 @@ int32_t ads_get_data(bool current_adc){
     data_storage =  data_storage << 8;
     data_storage |= Wire.read();
     data_storage = data_storage << 8;
-    data = (int32_t) data_storage;
+    data = (int32_t) data_storage; //TODO: verify that this works for negative values
     data = data >> 8;
   }
   return(data);
