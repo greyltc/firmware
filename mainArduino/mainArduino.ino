@@ -90,6 +90,10 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 const unsigned int HARDWARE_SPI_CS = 53; // arduino pin that goes (in hardware) with the SPI bus (must be set output)
 const unsigned int LED_pin = 13; // arduino pin for alive LED
 
+const unsigned int ETHERNET_SPI_CS = 10; // arduino pin that's connected to the ethernet shield's W5500 CS line
+const unsigned int SD_SPI_CS = 4; // arduino pin that's connected to the ethernet shield's SD card CS line
+
+
 #ifdef BIT_BANG_SPI
 // port expander software SPI bus pin definitions
 const unsigned int PE_CS_PIN = 22; // arduino pin for expanders chip select pin
@@ -116,6 +120,9 @@ SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
 EthernetServer server(serverPort);
 
 void setup() {
+  digitalWrite(SD_SPI_CS, HIGH); //deselect
+  pinMode(SD_SPI_CS, OUTPUT);
+  
   digitalWrite(HARDWARE_SPI_CS, HIGH); //deselect
   pinMode(HARDWARE_SPI_CS, OUTPUT);
 
@@ -141,6 +148,7 @@ void setup() {
   #ifdef DEBUG
   Serial.println("Getting IP via DHCP...");
   #endif
+  //Ethernet.init(ETHERNET_SPI_CS);
   Ethernet.begin(mac); // TODO: should call Ethernet.maintain() periodically, but in every loop is overkill
 
   #ifdef DEBUG
@@ -324,6 +332,8 @@ uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
   shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
   result = shiftIn(PE_MISO_PIN, PE_SCK_PIN, MSBFIRST);
   #else
+  //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ehternet ic is not selected
+  SPI.beginTransaction(switch_spi_settings);
   SPI.transfer(crtl_byte); // read operation
   SPI.transfer(reg_address); // iodirA register address
   result = SPI.transfer(0x00); // read the register
@@ -342,6 +352,7 @@ void mcp23x17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
   shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
   shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, value);
   #else
+  //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ehternet ic is not selected
   SPI.beginTransaction(switch_spi_settings);
   SPI.transfer(crtl_byte); // write operation
   SPI.transfer(reg_address); // iodirA register address
