@@ -1,4 +1,4 @@
-#define FIRMWARE_VER "7c0838d"
+#define FIRMWARE_VER "ed435aa"
 
 #include <Ethernet.h>
 
@@ -7,12 +7,12 @@
 //#define BIT_BANG_SPI
  
 # ifndef BIT_BANG_SPI
-# include <SPI.h>
+#include <SPI.h>
 #endif
 
 #include <Wire.h>
 
-// when DEBUG is defined, a serial comms interface will be brought up over USB and prints out some debug info
+// when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
 //#define DEBUG
 
 // do this to enter the control interface:
@@ -34,8 +34,6 @@ String const commands[][2] = {
 int nCommands = sizeof(commands)/sizeof(commands[0]);
 
 #define ERR_MSG client.print("ERROR: Got bad command '"); client.print(cmd); client.println("'");
-
-
 
 //ADS122C04 definitions
 #define CURRENT_ADS122C04_ADDRESS 0x41
