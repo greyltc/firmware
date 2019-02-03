@@ -8,7 +8,7 @@ arduino-cli core update-index
 arduino-cli core install arduino:avr
 arduino-cli lib install "Ethernet"
 
-arduino-cli compile -o mainArduino/build/mutovis_firmware -b arduino:avr:mega mainArduino/
+arduino-cli compile -b arduino:avr:mega mainArduino/
 ```
 
 ## Flashing
