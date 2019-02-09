@@ -5,4 +5,6 @@
 #arduino-cli core install arduino:avr
 #arduino-cli lib install "Ethernet"
 
-arduino-cli compile -o build/mutovis_firmware -b arduino:avr:mega . 
+cd mainArduino
+arduino-cli compile -v -o build/mutovis_firmware -b arduino:avr:mega .
+rm -rf /tmp/arduino-*
