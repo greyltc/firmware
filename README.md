@@ -12,7 +12,7 @@ arduino-cli compile -b arduino:avr:mega mainArduino/
 ```
 
 ## Flashing
-Via [arduino-cli](https://github.com/arduino/arduino-cli):
+Via [avrdude](http://www.nongnu.org/avrdude/):
 ```
 # first, figure out what port your arduino is on:
 arduino-cli board list
