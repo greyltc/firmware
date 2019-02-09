@@ -1,4 +1,4 @@
-#define FIRMWARE_VER "ed435aa"
+#define FIRMWARE_VER "7465e8b"
 
 #include <Ethernet.h>
 
