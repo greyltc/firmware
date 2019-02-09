@@ -4,6 +4,7 @@ Firmware design files for controlling the hardware from https://github.com/mutov
 ## Compiling
 Via [arduino-cli](https://github.com/arduino/arduino-cli):
 ```
+# you only need to do the following three lines once
 arduino-cli core update-index
 arduino-cli core install arduino:avr
 arduino-cli lib install "Ethernet"
