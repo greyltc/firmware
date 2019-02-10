@@ -1,39 +1,75 @@
-#define FIRMWARE_VER "7465e8b"
+#define FIRMWARE_VER "xxx"
 
+#include <SPI.h>
 #include <Ethernet.h>
+#include <Wire.h>
+
+// do something like this to enter the control interface:
+// socat -,rawer,echo,escape=0x03 TCP:10.42.0.54:23
+
+// ====== start user editable config ======
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
 //#define BIT_BANG_SPI
  
-# ifndef BIT_BANG_SPI
-#include <SPI.h>
-#endif
-
-#include <Wire.h>
-
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
 //#define DEBUG
 
-// do this to enter the control interface:
-// socat -,rawer,echo,escape=0x03 TCP:10.42.0.54:23
+// when NO_LED is defined, the LED is disabled so that it doesn't interfere with SPI SCK on boards like UNO
+//#define NO_LED
 
-// help
-String const commands[][2] = {
-  {"v", "diplay firmware revision"} ,
-  {"adc", "\"adcX\" returns count of channel X (can be [0,7]), just \"adc\" returns counts of all channels"} ,
-  {"s", "\"sXY\", selects pixel Y on substrate X, just \"s\" disconnects all pixels"} ,
-  {"c", "\"cX\", checks that MUX X is connected"} ,
-  {"d", "\"dX\" selects board X's type indicator resistor and returns associated adc counts"} ,
-  {"p", "\"pX\" returns photodiode X's adc counts"} ,
-  {"a", "\"a\" returns the analog voltage supply span as read by each of the adcs"} ,
-  {"disconnect or close or logout or exit or quit", "ends session"} ,
-  {"? or help", "print this help"}
+// uncomment and modify STATIC_IP to disable DHCP client mode
+//#define STATIC_IP { 10, 42, 0, 54 }
+
+// ====== end user editable config ======
+
+// help for commands
+const char help_0a[] PROGMEM = "v";
+const char help_0b[] PROGMEM = "diplay firmware revision";
+
+const char help_1a[] PROGMEM = "adc";
+const char help_1b[] PROGMEM = "\"adcX\" returns count of channel X (can be [0,7]), just \"adc\" returns counts of all channels";
+
+const char help_2a[] PROGMEM = "s";
+const char help_2b[] PROGMEM = "\"sXY\", selects pixel Y on substrate X, just \"s\" disconnects all pixels";
+
+const char help_3a[] PROGMEM = "c";
+const char help_3b[] PROGMEM = "\"cX\", checks that MUX X is connected";
+
+const char help_4a[] PROGMEM = "d";
+const char help_4b[] PROGMEM = "\"dX\" selects board X's type indicator resistor and returns associated adc counts";
+
+const char help_5a[] PROGMEM = "p";
+const char help_5b[] PROGMEM = "\"pX\" returns photodiode X's adc counts";
+
+const char help_6a[] PROGMEM = "a";
+const char help_6b[] PROGMEM = "\"a\" returns the analog voltage supply span as read by each of the adcs";
+
+const char help_7a[] PROGMEM = "disconnect or close or logout or exit or quit";
+const char help_7b[] PROGMEM = "ends session";
+
+const char help_8a[] PROGMEM = "? or help";
+const char help_8b[] PROGMEM = "print this help";
+
+const char* const help[] PROGMEM  = {
+  help_0a, help_0b,
+  help_1a, help_1b,
+  help_2a, help_2b,
+  help_3a, help_3b,
+  help_4a, help_4b,
+  help_5a, help_5b,
+  help_6a, help_6b,
+  help_7a, help_7b,
+  help_8a, help_8b
 };
 
-int nCommands = sizeof(commands)/sizeof(commands[0]);
+//a helper for retrieving the strings from PROGMEM
+#define PGM2STR(array, address)  (__FlashStringHelper*)pgm_read_word(array + address)
 
-#define ERR_MSG client.print("ERROR: Got bad command '"); client.print(cmd); client.println("'");
+int nCommands = (sizeof(help)/sizeof(help[0]))/2;
+
+#define ERR_MSG c.print(F("ERROR: Got bad command '")); c.print(cmd); c.println(F("'"));
 
 //ADS122C04 definitions
 #define CURRENT_ADS122C04_ADDRESS 0x41
@@ -86,11 +122,12 @@ int nCommands = sizeof(commands)/sizeof(commands[0]);
 #define V_D_EN 0x04
 
 const unsigned int HARDWARE_SPI_CS = 53; // arduino pin that goes (in hardware) with the SPI bus (must be set output)
+#ifndef NO_LED
 const unsigned int LED_pin = 13; // arduino pin for alive LED
+#endif
 
 const unsigned int ETHERNET_SPI_CS = 10; // arduino pin that's connected to the ethernet shield's W5500 CS line
 const unsigned int SD_SPI_CS = 4; // arduino pin that's connected to the ethernet shield's SD card CS line
-
 
 #ifdef BIT_BANG_SPI
 // port expander software SPI bus pin definitions
@@ -107,6 +144,9 @@ const unsigned int serverPort = 23; // telnet port
 
 // the media access control (ethernet hardware) address for the shield:
 const byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };
+#ifdef STATIC_IP
+const byte ip[] = STATIC_IP;  
+#endif
 
 uint8_t connected_devices = 0x00;
 
@@ -144,20 +184,29 @@ void setup() {
   Wire.begin(); // for I2C
 
   #ifdef DEBUG
-  Serial.println("Getting IP via DHCP...");
-  #endif
-  //Ethernet.init(ETHERNET_SPI_CS);
-  Ethernet.begin(mac); // TODO: should call Ethernet.maintain() periodically, but in every loop is overkill
-
-  #ifdef DEBUG
-  Serial.print("Done!\nListening for TCP connections on ");
-  Serial.print(Ethernet.localIP());
-  Serial.print(":");
-  Serial.print(serverPort);
-  Serial.println(" ...");
+  Serial.println(F("Getting IP via DHCP..."));
   #endif
   
+  //Ethernet.init(ETHERNET_SPI_CS); // only for non standard ethernet chipselects
+  
+  #ifdef STATIC_IP
+  Ethernet.begin(mac, ip);
+  #else
+  Ethernet.begin(mac);
+  #endif
+  
+  #ifdef DEBUG
+  Serial.println(F("Done!"));
+  Serial.print(F("Listening for TCP connections on "));
+  Serial.print(Ethernet.localIP());
+  Serial.print(F(":"));
+  Serial.print(serverPort);
+  Serial.println(F(" ..."));
+  #endif
+  
+  #ifndef NO_LED
   pinMode(LED_pin, OUTPUT); // to show we are working
+  #endif
 
   delayMicroseconds(500); // wait to ensure the adc has finished powering up
   ads_reset(true); // reset the current adc
@@ -172,55 +221,81 @@ volatile uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
 volatile int pixSetErr = ERR_GENERIC;
 volatile int32_t adcCounts;
 
+EthernetClient c;
 
-String cmd = "";
+const int cmd_buf_len = 10;
+char cmd_buf[cmd_buf_len] = { 0 };
+String cmd = String("");
+volatile bool half_hour_action_done = false;
 void loop() {
   pixSetErr = ERR_GENERIC;
   
+  //half hour task launcher
+  if (micros() > 1800000000){
+    if (half_hour_action_done == false){
+	     do_every_half_hour();
+	     half_hour_action_done = true;
+    }
+  } else {
+	   half_hour_action_done = false;
+  }
+  
+  #ifndef NO_LED
   //blink the alive pin
   digitalWrite(LED_pin, HIGH);
   delay(aliveCycleT);
   digitalWrite(LED_pin, LOW);
   delay(aliveCycleT);
+  #endif
 
   // wait for a new client:
-  EthernetClient client = server.available();
+  EthernetClient client = server.accept();
+  
+  if (client) {
+    if (c.connected()){
+      c.print(F("Bumped by new connection"));
+      c.stop(); // kick out the old connection
+    }
+    c = client;
+    c.setTimeout(5000); //give the client 5 seconds to send the 0xd to end the command
+  }
 
   // if we get bytes from someone
-  if (client) {
-    client.setTimeout(10000); //10s timeout
-    cmd = client.readStringUntil(0xd);
+  if (c && c.available() > 0) {
+    //get_cmd(cmd_buf, c, 0xd, cmd_buf_len);
+    //cmd = String(cmd_buf);
+    cmd = c.readStringUntil(0xd);
     cmd.toLowerCase(); //case insensative
-    client.println("");
+    c.println(F(""));
     
     if (cmd.equals("")){ //ignore empty command
       ;
     } else if (cmd.equals("v")){ //version request command
-      client.print("Firmware Version: ");
-      client.println(FIRMWARE_VER);
+      c.print(F("Firmware Version: "));
+      c.println(FIRMWARE_VER);
     } else if (cmd.equals("a")){ //analog voltage supply span command
-      client.print("Analog voltage span as read by U2 (current adc): ");
-      client.print(ads_check_supply(true),6);
-      client.println("V");
-      client.print("Analog voltage span as read by U5 (voltage adc): ");
-      client.print(ads_check_supply(false),6);
-      client.println("V");
+      c.print(F("Analog voltage span as read by U2 (current adc): "));
+      c.print(ads_check_supply(true),6);
+      c.println(F("V"));
+      c.print(F("Analog voltage span as read by U5 (voltage adc): "));
+      c.print(ads_check_supply(false),6);
+      c.println(F("V"));
     } else if (cmd.equals("s")){ //pixel deselect command
       mcp23x17_all_off();
     } else if (cmd.startsWith("s") & (cmd.length() == 3)){ //pixel select command
       pixSetErr = set_pix(cmd.substring(1));
       if (pixSetErr !=0){
-        client.print("ERROR: Pixel selection error code ");
-        client.println(pixSetErr);
+        c.print(F("ERROR: Pixel selection error code "));
+        c.println(pixSetErr);
       }
     } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
       uint8_t pd = cmd.charAt(1) - '0';
       if (pd == 1 | pd == 2){
-          client.print("Photodiode D");
-          client.print(pd);
-          client.print(" = ");
-          client.print(ads_get_single_ended(true,pd+1));
-          client.println(" counts");
+          c.print(F("Photodiode D"));
+          c.print(pd);
+          c.print(F(" = "));
+          c.print(ads_get_single_ended(true,pd+1));
+          c.println(F(" counts"));
       } else {
         ERR_MSG
       }
@@ -229,9 +304,9 @@ void loop() {
       if ((substrate >= 0) & (substrate <= 7)){
         bool result = mcp23x17_MUXCheck(substrate);
         if (result){
-          client.println("MUX OK");
+          c.println(F("MUX OK"));
         } else {
-          client.println("MUX not found");
+          c.println(F("MUX not found"));
         }
       } else {
         ERR_MSG
@@ -250,13 +325,13 @@ void loop() {
         mcp_reg_value &= ~ (1 << 2); // flip off V_D_EN bit
         mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
         
-        client.print("Board ");
+        c.print(F("Board "));
         cmd.toUpperCase();
-        client.print(cmd.charAt(1));
+        c.print(cmd.charAt(1));
         cmd.toLowerCase();
-        client.print(" sense resistor = ");
-        client.print(adcCounts);
-        client.println(" counts");
+        c.print(F(" sense resistor = "));
+        c.print(adcCounts);
+        c.println(F(" counts"));
       } else {
         ERR_MSG
       }
@@ -264,38 +339,38 @@ void loop() {
       if (cmd.length() == 3){ //list all of the channels' counts
         for(int i=0; i<=7; i++){
           if ((i >= 0) & (i <= 3)){
-            client.print("AIN");
-            client.print(i);
-            client.print(" (U2, current adc, channel ");
-            client.print(i);
-            client.print(") = ");
-            client.print(ads_get_single_ended(true,i));
-            client.println(" counts");
+            c.print(F("AIN"));
+            c.print(i);
+            c.print(F(" (U2, current adc, channel "));
+            c.print(i);
+            c.print(F(") = "));
+            c.print(ads_get_single_ended(true,i));
+            c.println(F(" counts"));
           }
           if ((i >= 4) & (i <= 7)){
-            client.print("AIN");
-            client.print(i);
-            client.print(" (U5, voltage adc, channel ");
-            client.print(i-4);
-            client.print(") = ");
-            client.print(ads_get_single_ended(false,i-4));
-            client.println(" counts");
+            c.print(F("AIN"));
+            c.print(i);
+            c.print(F(" (U5, voltage adc, channel "));
+            c.print(i-4);
+            c.print(F(") = "));
+            c.print(ads_get_single_ended(false,i-4));
+            c.println(F(" counts"));
           }
         }
       } else if (cmd.length() == 4){
         int chan = cmd.charAt(3) - '0'; // 0-3 are mapped to U2's (current adc) chans AIN0-3, 4-7 are mapped to U5's (voltage adc) chans AIN0-3
         if ((chan >= 0) & (chan <= 3)){  
-          client.print("AIN");
-          client.print(chan);
-          client.print("= ");
-          client.print(ads_get_single_ended(true,chan));
-          client.println(" counts");
+          c.print(F("AIN"));
+          c.print(chan);
+          c.print(F("= "));
+          c.print(ads_get_single_ended(true,chan));
+          c.println(F(" counts"));
         } else if ((chan >= 4) & (chan <= 7)) {
-          client.print("AIN");
-          client.print(chan);
-          client.print("= ");
-          client.print(ads_get_single_ended(false,chan-4));
-          client.println(" counts");
+          c.print(F("AIN"));
+          c.print(chan);
+          c.print(F("= "));
+          c.print(ads_get_single_ended(false,chan-4));
+          c.println(F(" counts"));
         } else {
           ERR_MSG
         }
@@ -303,21 +378,52 @@ void loop() {
         ERR_MSG
       }
     } else if (cmd.equals("?") | cmd.equals("help")){ //help request command
-      client.println("__Supported Commands__");
+	  c.println(F("__Supported Commands__"));
       for(int i=0; i<nCommands;i++){
-        client.print(commands[i][0]);
-        client.print(": ");
-        client.println(commands[i][1]);
+        c.print(PGM2STR(help, 2*i));
+        c.print(F(": "));
+        c.println(PGM2STR(help, 2*i+1));
       }
-    } else if (cmd.equals("exit") | cmd.equals("close") | cmd.equals("disconnect") | cmd.equals("quit") | cmd.equals("logout")){ //logout
-      client.println("Goodbye");
-      client.stop();
+    } else if (cmd.equals(F("exit")) | cmd.equals(F("close")) | cmd.equals(F("disconnect")) | cmd.equals(F("quit")) | cmd.equals(F("logout"))){ //logout
+      c.println(F("Goodbye"));
+      c.stop();
     } else { //bad command
       ERR_MSG
     }
     
-    client.print(">>> "); //send prompt
+    c.print(F(">>> ")); //send prompt
   }
+  
+  if (c && !c.connected()){
+    c.stop();
+  }
+}
+
+// gets run about every 30 mins
+void do_every_half_hour(void){
+  #ifdef DEBUG
+  Serial.println(F("Requesting DHCP renewal"));
+  #endif
+  Ethernet.maintain(); // DHCP renewal
+}
+
+// reads bytes from a client connection and puts them into buf until
+// either the stop byte has been read or maximum-1 bytes have been read
+// always delivers with a null termination
+void get_cmd(char* buf, EthernetClient c, byte stop, int maximum){
+  byte a = 0x00;
+  int i = 0;
+  while ( i < (maximum-1) ){
+	while(c.available() == 0){}
+	a = c.read();
+	if (a == stop){
+	  break;
+    } else {
+	  buf[i] = a;
+    }
+    i++;
+  }
+  buf[i] = 0x00; // null terminate
 }
 
 uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
@@ -330,7 +436,8 @@ uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
   shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
   result = shiftIn(PE_MISO_PIN, PE_SCK_PIN, MSBFIRST);
   #else
-  //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ehternet ic is not selected
+  //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ethernet ic is not selected
+  //SPI.endTransaction();
   SPI.beginTransaction(switch_spi_settings);
   SPI.transfer(crtl_byte); // read operation
   SPI.transfer(reg_address); // iodirA register address
@@ -350,7 +457,8 @@ void mcp23x17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
   shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
   shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, value);
   #else
-  //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ehternet ic is not selected
+  //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ethernet ic is not selected
+  //SPI.endTransaction();
   SPI.beginTransaction(switch_spi_settings);
   SPI.transfer(crtl_byte); // write operation
   SPI.transfer(reg_address); // iodirA register address
@@ -377,7 +485,7 @@ bool mcp23x17_MUXCheck(uint8_t substrate){
   bool foundIT = false;
   uint8_t previous = 0x00;
   uint8_t response = 0x00;
-  static const uint8_t tester = 0b10101010;
+  const uint8_t tester = 0b10101010;
   previous = mcp23x17_read(substrate, MCP_DEFVALA_ADDR); //and try to read it back
   mcp23x17_write(substrate, MCP_DEFVALA_ADDR, tester); //program the test value
   response = mcp23x17_read(substrate, MCP_DEFVALA_ADDR); //and try to read it back
