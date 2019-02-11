@@ -1,4 +1,4 @@
-#define FIRMWARE_VER "524d674"
+#define FIRMWARE_VER "53cebdb"
 
 #include <SPI.h>
 #include <Ethernet.h>
