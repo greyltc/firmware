@@ -81,7 +81,7 @@ int nCommands = (sizeof(help)/sizeof(help[0]))/2;
 #define ADS122C04_RREG_CODE 0x20
 #define ADS122C04_WREG_CODE 0x40
 #define ADS122C04_INTERNAL_REF 2.048
-#define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, 20 samples/sec, with 0.99ms headroom 
+#define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, 20 samples/sec, with 0.99ms headroom
 
 //some definitions for the MCP23S17
 #define MCP_IODIRA_ADDR 0x00
@@ -319,19 +319,16 @@ void loop() {
         mcp_reg_value = mcp23x17_read(mcp_dev_addr, MCP_OLATA_ADDR); // read OLATA
         mcp_reg_value |= (1 << 2); // flip on V_D_EN bit
         mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
-
-        adcCounts = ads_get_resistor();
-
-        mcp_reg_value &= ~ (1 << 2); // flip off V_D_EN bit
-        mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
         
         c.print(F("Board "));
         cmd.toUpperCase();
         c.print(cmd.charAt(1));
         cmd.toLowerCase();
-        c.print(F(" sense resistor = "));
-        c.print(adcCounts);
-        c.println(F(" counts"));
+        c.print(F(" sense resistor = ")); 
+        c.print(ads_get_resistor(),0);
+        mcp_reg_value &= ~ (1 << 2); // flip off V_D_EN bit
+        mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+        c.println(F(" Ohm"));
       } else {
         ERR_MSG
       }
@@ -578,18 +575,21 @@ int32_t ads_get_single_ended(bool current_adc, int channel){
   return (reading);
 }
 
-// get adapter board resistor counts
-int32_t ads_get_resistor(void){
-  int32_t reading = 0;
+// get adapter board resistor value
+// maximum resistor value with this setup is capable of measuring is 40.960K ohm
+// maybe only accurate to within +/- 6%
+float ads_get_resistor(void){
+  float R = 0;
   if( ads_reset(true) == 0) {
     ads_write(true, 0, B1000<<4); //ain0 to avss on mux
-    ads_write(true, 2, B100<<0); //set IDACs to 250uA
+    ads_write(true, 2, B010<<0); //set IDACs to 50uA
+    delayMicroseconds(200); // wait to ensure the IDACs have started up
     ads_write(true, 3, B001<<5); //connect IDAC1 to AIN0
-    //ads_write(true, 1, B00000100); //v ref is full scale analog range
-    reading = ads_single_shot(true);
-    ads_reset(true); // reset now because we don't want that current source to be connected to unexpected places later
+    R = (ads_single_shot(true)*ADS122C04_INTERNAL_REF)/(pow(2,23)*50e-6);
+    ads_write(true, 3, 0x00); //clear config 3 register (disconnects IDACs)
+    ads_write(true, 2, 0x00); //clear config 2 register (sets IDACs to off)
   }
-  return(reading);
+  return(R);
 }
 
 // make a single shot reading
