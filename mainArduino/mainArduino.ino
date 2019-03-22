@@ -22,6 +22,9 @@
 // uncomment and modify STATIC_IP to disable DHCP client mode
 //#define STATIC_IP { 10, 42, 0, 54 }
 
+// when ADS1015 is defined, the build will be for the old board with ADS1015, otherwise it'll be for ADS122C04
+//#define ADS1015
+
 // ====== end user editable config ======
 
 // help for commands
@@ -71,6 +74,10 @@ int nCommands = (sizeof(help)/sizeof(help[0]))/2;
 
 #define ERR_MSG c.print(F("ERROR: Got bad command '")); c.print(cmd); c.println(F("'"));
 
+#ifdef ADS1015
+#include <Adafruit_ADS1015.h>
+Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
+#else
 //ADS122C04 definitions
 #define CURRENT_ADS122C04_ADDRESS 0x41
 #define VOLTAGE_ADS122C04_ADDRESS 0x40
@@ -82,6 +89,7 @@ int nCommands = (sizeof(help)/sizeof(help[0]))/2;
 #define ADS122C04_WREG_CODE 0x40
 #define ADS122C04_INTERNAL_REF 2.048
 #define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, 20 samples/sec, with 0.99ms headroom
+#endif
 
 //some definitions for the MCP23S17
 #define MCP_IODIRA_ADDR 0x00
@@ -209,8 +217,12 @@ void setup() {
   #endif
 
   delayMicroseconds(500); // wait to ensure the adc has finished powering up
+  #ifdef ADS1015
+  ads.begin();
+  #else
   ads_reset(true); // reset the current adc
   ads_reset(false); // reset the voltage adc
+  #endif
 
   // setup the port expanders
   connected_devices = setup_MCP();
@@ -546,14 +558,17 @@ int set_pix(String pix){
 // check analog voltage range
 float ads_check_supply(bool current_adc){
   float data = 0;
+#ifndef ADS1015 
   if( ads_reset(current_adc) == 0){
     if (ads_write(true, 0, B1101<<4) == 0){ // mux set for analog range/4
       data = 4.0*(ads_single_shot(current_adc)*ADS122C04_INTERNAL_REF)/pow(2,23);
     }
   }
+#endif
   return(data);
 }
 
+#ifndef ADS1015
 // get gain configuration for ads
 int ads_get_gain(bool current_adc){
   uint8_t reg0 = ads_read(current_adc, 0);
@@ -561,16 +576,21 @@ int ads_get_gain(bool current_adc){
   reg0 = reg0 >> 1;
   return(((int)reg0) + 1);
 }
+#endif
 
 // get channel adc reading with respect to AVSS
 int32_t ads_get_single_ended(bool current_adc, int channel){
   int32_t reading = 0;
 
   if ((channel >= 0) & (channel <= 3)){
+#ifdef ADS1015
+    reading = ads.readADC_SingleEnded(channel);
+#else
     if (ads_reset(current_adc) == 0){
       ads_write(current_adc, 0, (0x08|channel) << 4);
       reading = ads_single_shot(current_adc);
     }
+#endif
   }
   return (reading);
 }
@@ -580,6 +600,7 @@ int32_t ads_get_single_ended(bool current_adc, int channel){
 // maybe only accurate to within +/- 6%
 float ads_get_resistor(void){
   float R = 0;
+#ifndef ADS1015
   if( ads_reset(true) == 0) {
     ads_write(true, 0, B1000<<4); //ain0 to avss on mux
     ads_write(true, 2, B010<<0); //set IDACs to 50uA
@@ -589,9 +610,11 @@ float ads_get_resistor(void){
     ads_write(true, 3, 0x00); //clear config 3 register (disconnects IDACs)
     ads_write(true, 2, 0x00); //clear config 2 register (sets IDACs to off)
   }
+#endif
   return(R);
 }
 
+#ifndef ADS1015
 // make a single shot reading
 int32_t ads_single_shot(bool current_adc){
   int32_t reading = 0;
@@ -695,6 +718,7 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
 
   return(reg_value);
 }
+#endif
 
 uint8_t setup_MCP(void){
   // pulse CS to clear out weirdness from startup
