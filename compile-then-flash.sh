@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# typical usage is `./flash.sh /dev/ttyACM0`
+# typical usage is `./compile-then-flash.sh /dev/ttyACM0`
 
 # the first (only) argument to this script must be the arduino's port
 # find it by running `arduino-cli board list`
@@ -12,6 +12,7 @@
 
 # user must have write permissions for the arduino port (probably enough to be in the uucp group)
 
-cd mainArduino/build
-#avrdude -v -C/etc/avrdude.conf -patmega2560 -cwiring -P"$1" -b115200 -D -Uflash:w:mutovis_firmware.hex:i
-arduino-cli upload -b arduino:avr:mega -i mutovis_firmware.hex -p "$1" -v -t
+echo "======COMPILING======"
+./compile.sh
+echo "======FLASHING======"
+./flash.sh "$1"
