@@ -19,7 +19,7 @@ Via [avrdude](http://www.nongnu.org/avrdude/):
 ```
 # first, figure out what port your arduino is on:
 arduino-cli board list
-# then flash the firmware you compiled above
+# then flash the firmware you compiled above (after editing in the correct value for -P you just discovered)
 cd mainArduino
 avrdude -v -C/etc/avrdude.conf -patmega2560 -cwiring -P/dev/ttyACMX -b115200 -D -Uflash:w:build/mutovis_firmware.hex:i
 ```
