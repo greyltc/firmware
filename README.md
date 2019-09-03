@@ -8,6 +8,7 @@ Via [arduino-cli](https://github.com/arduino/arduino-cli):
 arduino-cli core update-index
 arduino-cli core install arduino:avr
 arduino-cli lib install "Ethernet"
+arduino-cli lib install "SD"
 
 cd mainArduino
 arduino-cli compile -v -o build/mutovis_firmware -b arduino:avr:mega .
