@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <Wire.h>
+#include <SD.h>
 
 // do something like this to enter the control interface:
 // socat -,rawer,echo,escape=0x03 TCP:10.42.0.54:23
@@ -14,7 +15,7 @@
 //#define BIT_BANG_SPI
  
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
-//#define DEBUG
+#define DEBUG
 
 // when NO_LED is defined, the LED is disabled so that it doesn't interfere with SPI SCK on boards like UNO
 //#define NO_LED
@@ -88,7 +89,8 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #define ADS122C04_RREG_CODE 0x20
 #define ADS122C04_WREG_CODE 0x40
 #define ADS122C04_INTERNAL_REF 2.048
-#define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, 20 samples/sec, with 0.99ms headroom
+#define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, ~20 samples/sec. has 0.99ms headroom. actual time is 51192 normal mode clock cycles (1.024 MHz)
+#define ADS122C04_CONVERSION_TIME_TURBO 506 // in microseconds, for the fastest possible continuous sample rate: turbo mode, ~2k samples/sec. actual time is 1036 turbo mode clock cycles (2.048 MHz). has 0.140625 microseconds headroom
 #endif
 
 //some definitions for the MCP23S17
@@ -165,6 +167,9 @@ SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
 // setup telnet server
 EthernetServer server(serverPort);
 
+// file handle for streaming ADC data to SD card
+File fStream;
+
 void setup() {
   digitalWrite(SD_SPI_CS, HIGH); //deselect
   pinMode(SD_SPI_CS, OUTPUT);
@@ -191,6 +196,8 @@ void setup() {
 
   Wire.begin(); // for I2C
 
+
+  // ============= ethernet setup ============== 
   #ifdef DEBUG
   Serial.println(F("Getting IP via DHCP..."));
   #endif
@@ -210,12 +217,78 @@ void setup() {
   Serial.print(F(":"));
   Serial.print(serverPort);
   Serial.println(F(" ..."));
-  #endif
+  #endif // DEBUG
+
+
+  // ============= SD card setup ============== 
+  #ifdef DEBUG
+  Serial.print(F("Initializing SD card..."));
+  #endif // DEBUG
+
+  if (!SD.begin(SD_SPI_CS)) {
+	#ifdef DEBUG
+    Serial.println(F("SD initialization failed!"));
+    #endif // DEBUG
+    while (1); // chill here forever if SD card init failed
+  } else { // SD card init worked
+    #ifdef DEBUG
+    Serial.println(F("SD initialization complete."));
+    #endif // DEBUG
+    
+    fStream = SD.open(F("sample_stream.bin"), FILE_WRITE);
+    if (fStream) {  // if the file opened okay, write to it
+      #ifdef DEBUG
+      Serial.print(F("Writing to SD card..."));
+      #endif // DEBUG
+      
+      fStream.println(F("testing 1, 2, 3.")); // expecting 17 (or 18) bytes to be written here
+      fStream.close(); // close the file
+      
+      #ifdef DEBUG
+      Serial.println(F("done."));
+      #endif // DEBUG
+    } else {
+      #ifdef DEBUG
+      Serial.println(F("error opening test.txt"));  // if the file didn't open, print an error
+      #endif // DEBUG
+    } // section for if the SD card file opened for writing properly
+    
+    fStream = SD.open(F("oh_hi.txt"), FILE_READ);
+    if (fStream) {  // if the file opened okay, read it
+      #ifdef DEBUG
+      Serial.print(F("reading from oh_hi.txt..."));
+      #endif // DEBUG
+      
+      int can_read = fStream.available();
+      
+      #ifdef DEBUG
+      Serial.println(F("reading from oh_hi.txt..."));
+      #endif // DEBUG
+      
+      #ifdef DEBUG
+      Serial.print(F("Looks like we can read "));
+      Serial.print(can_read);
+      Serial.print(F(" bytes from oh_hi.txt"));
+      #endif // DEBUG
+      
+      fStream.println(F("testing 1, 2, 3.")); // expecting 17 (or 18) bytes to be written here
+      fStream.close(); // close the file
+      
+      #ifdef DEBUG
+      Serial.println(F("done."));
+      #endif // DEBUG
+    } else {
+      #ifdef DEBUG
+      Serial.println(F("error opening test.txt"));  // if the file didn't open, print an error
+      #endif // DEBUG
+    } // section for if the SD card file opened for writing properly
+  } // SD card setup
   
   #ifndef NO_LED
   pinMode(LED_pin, OUTPUT); // to show we are working
   #endif
 
+  // ============= ADC setup ============== 
   delayMicroseconds(500); // wait to ensure the adc has finished powering up
   #ifdef ADS1015
   ads.begin();
@@ -660,7 +733,7 @@ int32_t ads_get_data(bool current_adc){
   uint8_t address;
   uint8_t transmission_status;
   
-  if (current_adc) {
+  if (current_adc == true) {
     address = CURRENT_ADS122C04_ADDRESS;
     
   } else {
@@ -711,7 +784,7 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
   }
   Wire.beginTransmission(address);
   Wire.write(((reg & 0x03)<<2)|ADS122C04_RREG_CODE);
-  if (Wire.endTransmission(false) == 0){ // TODO: impossible to tell the difference between a NAK and 0x00 register value :-(
+  if (Wire.endTransmission(false) == 0){ // TODO: impossible to tell the difference between a NAK and 0x00 register value, sad times :-(
     Wire.requestFrom(address, (uint8_t)1);
     reg_value = Wire.read();
   }
