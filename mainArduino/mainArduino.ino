@@ -538,7 +538,7 @@ void command_handler(EthernetClient c, String cmd){
 #ifdef USE_SD
 #ifndef ADS1015
   } else if (cmd.equals("stream")){ //stream data to SD card
-    stream_ADC();
+    stream_ADC(c);
     c.println(F("ADC streaming complete. Check "STREAM_FILE" on the SD card."));
 #endif //ADS1015
 #endif //USE_SD
@@ -826,6 +826,21 @@ uint8_t ads_start_sync(bool current_adc){
   return(Wire.endTransmission());
 }
 
+//send the POWERDOWN command
+uint8_t ads_powerdown(bool current_adc){
+  uint8_t address;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(ADS122C04_POWERDOWN_CODE);
+  return(Wire.endTransmission());
+  // consider putting 60ms delay here
+}
+
 //get latest adc counts
 int32_t ads_get_data(bool current_adc){
   int32_t data = 0;
@@ -843,7 +858,7 @@ int32_t ads_get_data(bool current_adc){
   Wire.beginTransmission(address);
   Wire.write(ADS122C04_RDATA_CODE);
   if (Wire.endTransmission(false) == 0){
-    Wire.requestFrom(address, (uint8_t)3);
+    Wire.requestFrom(address, (uint8_t) 3);
     data_storage =  Wire.read();
     data_storage =  data_storage << 8;
     data_storage |= Wire.read();
@@ -891,18 +906,73 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
 
   return(reg_value);
 }
-#endif
 
 #ifdef USE_SD
-#ifndef ADS1015
 // stream data from the ADC to a file in the SD card
-void stream_ADC(void){
+void stream_ADC(EthernetClient c){
+  int32_t n_readings = 10000; // the number of readings to stream into the file
+  c.print(F("Recording "));
+  c.print(n_readings);
+  c.print(F(" voltage values to the SD card on a 505.859375 microsecond interval..."));
+  //volatile byte one_value[4] = {0x00}; // one reading from the ADC
+  volatile byte one_value[3] = {0x00}; // one reading from the ADC
+  volatile byte last_counter_value = 0x00;
+  volatile byte this_counter_value = 0x00;
+  volatile float voltage = 0.0;
+  volatile int32_t counts = 0;
+
+  // setup ADS
+  ads_write(true, 2, B1<<6); //DCNT=1, data counter enable
+  ads_write(true, 0, B1011 << 4); //that's one photodiode (AINp=Ain3, AINn=AVSS) and B1010 is the other one
+  ads_write(true, 1, B11011000); //CM=1, MODE=1, DR=110, 2k samples/sec continuously
+  ads_start_sync(true);
+  delayMicroseconds(52); // datasheet says the first conversion starts 105 clock cycles after START/SYNC (in turbo mode when t_clk=1/2.048 MHz)
+  
+  // disable interrupts
+  Wire.setClock(400000);// need I2C fast mode here to keep up with the ADC sample rate
   fsd = SD.open(F(STREAM_FILE), FILE_WRITE);
-  fsd.println(F("Some data from the ADC goes here.")); // expecting 17 (or 18) bytes to be written here
+  for (int32_t i = 0; i<n_readings; i++){
+    while (last_counter_value == this_counter_value){ // keep looking for new data
+      Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
+      Wire.write(ADS122C04_RDATA_CODE);
+      if (Wire.endTransmission(false) == 0){
+        Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, (uint8_t) 4);
+        this_counter_value =  Wire.read();
+        one_value[0] =  Wire.read();
+        one_value[1] =  Wire.read();
+        one_value[2] =  Wire.read();
+        //one_value[3] = this_counter_value;
+      }
+      delayMicroseconds(100); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
+    }
+    last_counter_value = this_counter_value; // remember what the last sample counter value was
+    fsd.write((byte*)one_value, sizeof one_value); // write the sample to the SD card
+  }
+  fsd.close();
+  Wire.setClock(100000);// go back to I2C standard mode
+  // re-enable interrupts
+
+  // clean up ADS
+  ads_powerdown(true); // power down the current adc and stop any ongoing conversion
+  delay(60); //worst possible case powerdown dealy (10ms longer than slowest possible conversion time)
+  ads_reset(true); // reset the current adc
+
+  c.println(F("done!"));
+  c.println(F("Now playing them back:"));
+
+  // now we can print back the values we just measured
+  fsd = SD.open(F(STREAM_FILE), FILE_READ);
+  for (int32_t i = 0; i<n_readings; i++){
+    ((byte *) &counts)[2] = fsd.read();
+    ((byte *) &counts)[1] = fsd.read();
+    ((byte *) &counts)[0] = fsd.read();
+    voltage = 1.0*(counts*ADS122C04_INTERNAL_REF)/pow(2,23);
+    c.println(voltage,8);
+  }
   fsd.close();
 }
-#endif //ADS1015
 #endif //USE_SD
+#endif // NOT ADS1015
 
 uint8_t setup_MCP(void){
   // pulse CS to clear out weirdness from startup
