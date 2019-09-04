@@ -24,7 +24,7 @@
 // ====== end user editable config ======
 
 // FYI-- do something like this to enter the control interface:
-// socat -,rawer,echo,escape=0x03 TCP:10.42.0.54:23
+// telnet 10.42.0.54
 
 #include <SPI.h>
 #include <Ethernet.h>
@@ -348,6 +348,8 @@ const int cmd_buf_len = 10;
 volatile char cmd_buf[cmd_buf_len] = { 0x00 };
 String cmd = String("");
 volatile bool half_hour_action_done = false;
+
+// main program loop
 void loop() {
   pixSetErr = ERR_GENERIC;
   
@@ -417,7 +419,7 @@ void loop() {
   // stop any clients which disconnect
   for (int i = 0; i < max_ethernet_clients; i++) {
     if (clients[i] && !clients[i].connected()) {
-      clients[i].print(F("Goodbye Client Number"));
+      clients[i].print(F("Goodbye Client Number "));
       clients[i].print(i);
       clients[i].println(F("."));
       clients[i].stop();
