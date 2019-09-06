@@ -910,16 +910,22 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
 #ifdef USE_SD
 // stream data from the ADC to a file in the SD card
 void stream_ADC(EthernetClient c){
-  int32_t n_readings = 10000; // the number of readings to stream into the file
+  static const int32_t n_readings = 10000; // the number of readings to stream into the file
   c.print(F("Recording "));
   c.print(n_readings);
   c.print(F(" voltage values to the SD card on a 505.859375 microsecond interval..."));
-  //volatile byte one_value[4] = {0x00}; // one reading from the ADC
-  volatile byte one_value[3] = {0x00}; // one reading from the ADC
+  volatile byte buf[4] = {0x00}; // buffer for ADC comms
+  //volatile byte one_value[3] = {0x00}; // one reading from the ADC
   volatile byte last_counter_value = 0x00;
   volatile byte this_counter_value = 0x00;
+  volatile byte b = 0x00; // buffer for sdcard reading
   volatile float voltage = 0.0;
   volatile int32_t counts = 0;
+  volatile uint32_t pos = 0; // file read position
+  volatile int16_t read_result = -1;
+  volatile size_t write_result = 0;
+
+  SD.remove(F(STREAM_FILE)); // delete any potential leftover stream file from the SD card
 
   // setup ADS
   ads_write(true, 2, B1<<6); //DCNT=1, data counter enable
@@ -931,22 +937,28 @@ void stream_ADC(EthernetClient c){
   // disable interrupts
   Wire.setClock(400000);// need I2C fast mode here to keep up with the ADC sample rate
   fsd = SD.open(F(STREAM_FILE), FILE_WRITE);
-  for (int32_t i = 0; i<n_readings; i++){
+  for (uint32_t s = 0; s<n_readings; s++){
     while (last_counter_value == this_counter_value){ // keep looking for new data
       Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
       Wire.write(ADS122C04_RDATA_CODE);
       if (Wire.endTransmission(false) == 0){
         Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, (uint8_t) 4);
-        this_counter_value =  Wire.read();
-        one_value[0] =  Wire.read();
-        one_value[1] =  Wire.read();
-        one_value[2] =  Wire.read();
-        //one_value[3] = this_counter_value;
+        Wire.readBytes((byte*)buf, 4);
+        this_counter_value = buf[0];
       }
-      delayMicroseconds(100); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
+      delayMicroseconds(20); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
     }
     last_counter_value = this_counter_value; // remember what the last sample counter value was
-    fsd.write((byte*)one_value, sizeof one_value); // write the sample to the SD card
+    
+    //reliable SD card write
+    write_result = 0;
+    while (write_result != 3){
+      pos = fsd.position();
+      write_result = fsd.write((byte*)&buf[1], 3); // write the sample to the SD card
+      if (write_result != 3){
+        fsd.seek(pos); // go back
+      }
+    }
   }
   fsd.close();
   Wire.setClock(100000);// go back to I2C standard mode
@@ -960,14 +972,20 @@ void stream_ADC(EthernetClient c){
   c.println(F("done!"));
   c.println(F("Now playing them back:"));
 
+  counts = 0;
   // now we can print back the values we just measured
   fsd = SD.open(F(STREAM_FILE), FILE_READ);
-  for (int32_t i = 0; i<n_readings; i++){
-    ((byte *) &counts)[2] = fsd.read();
-    ((byte *) &counts)[1] = fsd.read();
-    ((byte *) &counts)[0] = fsd.read();
-    voltage = 1.0*(counts*ADS122C04_INTERNAL_REF)/pow(2,23);
-    c.println(voltage,8);
+  for (uint32_t r = 0; r<n_readings; r++){
+    // reliable SD card read
+    read_result = -1;
+    while (read_result != 3){
+      pos = fsd.position();
+      read_result = fsd.readBytes((byte*) buf, 3);
+      if (read_result != 3){
+        fsd.seek(pos); // go back
+      }
+    }
+    c.write((byte*) buf, 3);
   }
   fsd.close();
 }
