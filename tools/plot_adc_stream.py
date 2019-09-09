@@ -8,6 +8,7 @@ from telnetlib import Telnet
 import numpy
 import matplotlib.pyplot as plt
 import socket
+import time
 
 HOST = "WIZnet111785.desk_lan"
 PROMPT = b'>>> '  # the firmware's prompt
@@ -59,11 +60,14 @@ with MyTelnet(HOST) as tn:
 
     tn.read_until(b'back:\r\n')
     print('Reading back waveform data...', end='', flush=True)
+
+    start = time.time()
     raw_stream = sock_read_until(tn.sock, b'ADC streaming complete.').strip(b'ADC streaming complete.')
+    end = time.time()
+    print(end - start)
 
     print('done!')
     leftover = tn.read_response()  # get the prompt
-    print(len(leftover))
 
     # close/cleanup the connection
     tn.send_cmd('close')  # not strictly needed

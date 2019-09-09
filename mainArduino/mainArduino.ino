@@ -9,8 +9,8 @@
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
 //#define DEBUG
 
-// when USE_SD is defined the we'll be able to stream ADS122C04 readings to a file in the SD card
-#define USE_SD
+// when USE_SD is defined the we'll be ready to use the SD card
+//#define USE_SD
 
 // when NO_LED is defined, the LED is disabled so that it doesn't interfere with SPI SCK on boards like UNO
 //#define NO_LED
@@ -27,7 +27,15 @@
 // telnet 10.42.0.54
 
 #include <SPI.h>
+
 #include <Ethernet.h>
+// NOTE: the standard ethernet library uses an spi clock speed that's too slow for us
+// normally, the ethernet library operates SPI at a "safe" clock speed:
+// #define SPI_ETHERNET_SETTINGS SPISettings(14000000, MSBFIRST, SPI_MODE0)
+// we can (and must to keep up with the ADC) go faster, so we should have
+// #define SPI_ETHERNET_SETTINGS SPISettings(30000000, MSBFIRST, SPI_MODE0)
+// set in Arduino/libraries/Ethernet/src/utility/w5100.h
+
 #include <Wire.h>
 #ifdef USE_SD
 #include <SD.h>
@@ -58,12 +66,10 @@ const char help_p_b[] PROGMEM = "\"pX\" returns photodiode X's adc counts";
 const char help_a_a[] PROGMEM = "a";
 const char help_a_b[] PROGMEM = "\"a\" returns the analog voltage supply span as read by each of the adcs";
 
-#ifdef USE_SD
 #ifndef ADS1015
 const char help_stream_a[] PROGMEM = "stream";
-const char help_stream_b[] PROGMEM = "\"stream\" streams ADC data to the SD card";
+const char help_stream_b[] PROGMEM = "\"stream\" streams ADC data";
 #endif //ADS1015
-#endif //USE_SD
 
 const char help_exit_a[] PROGMEM = "disconnect or close or logout or exit or quit";
 const char help_exit_b[] PROGMEM = "ends session";
@@ -79,11 +85,9 @@ const char* const help[] PROGMEM  = {
   help_d_a, help_d_b,
   help_p_a, help_p_b,
   help_a_a, help_a_b,
-#ifdef USE_SD
 #ifndef ADS1015
   help_stream_a, help_stream_b,
 #endif //ADS1015
-#endif //USE_SD
   help_exit_a, help_exit_b,
   help_help_a, help_help_b
 };
@@ -535,13 +539,11 @@ void command_handler(EthernetClient c, String cmd){
     } else {
       ERR_MSG
     }
-#ifdef USE_SD
 #ifndef ADS1015
-  } else if (cmd.equals("stream")){ //stream data to SD card
+  } else if (cmd.equals("stream")){ //stream sample data from the ADC
     stream_ADC(c);
-    c.println(F("ADC streaming complete. Check "STREAM_FILE" on the SD card."));
+    c.println(F("ADC streaming complete."));
 #endif //ADS1015
-#endif //USE_SD
   } else if (cmd.equals("?") | cmd.equals("help")){ //help request command
     c.println(F("__Supported Commands__"));
     for(int i=0; i<nCommands;i++){
@@ -907,25 +909,17 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
   return(reg_value);
 }
 
-#ifdef USE_SD
-// stream data from the ADC to a file in the SD card
+// stream data from the ADC
 void stream_ADC(EthernetClient c){
   static const int32_t n_readings = 10000; // the number of readings to stream into the file
   c.print(F("Recording "));
   c.print(n_readings);
   c.print(F(" voltage values to the SD card on a 505.859375 microsecond interval..."));
+  c.println(F("done!"));
+  c.println(F("Now playing them back:"));
   volatile byte buf[4] = {0x00}; // buffer for ADC comms
-  //volatile byte one_value[3] = {0x00}; // one reading from the ADC
   volatile byte last_counter_value = 0x00;
   volatile byte this_counter_value = 0x00;
-  volatile byte b = 0x00; // buffer for sdcard reading
-  volatile float voltage = 0.0;
-  volatile int32_t counts = 0;
-  volatile uint32_t pos = 0; // file read position
-  volatile int16_t read_result = -1;
-  volatile size_t write_result = 0;
-
-  SD.remove(F(STREAM_FILE)); // delete any potential leftover stream file from the SD card
 
   // setup ADS
   ads_write(true, 2, B1<<6); //DCNT=1, data counter enable
@@ -936,7 +930,6 @@ void stream_ADC(EthernetClient c){
   
   // disable interrupts
   Wire.setClock(400000);// need I2C fast mode here to keep up with the ADC sample rate
-  fsd = SD.open(F(STREAM_FILE), FILE_WRITE);
   for (uint32_t s = 0; s<n_readings; s++){
     while (last_counter_value == this_counter_value){ // keep looking for new data
       Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
@@ -949,18 +942,10 @@ void stream_ADC(EthernetClient c){
       delayMicroseconds(20); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
     }
     last_counter_value = this_counter_value; // remember what the last sample counter value was
-    
-    //reliable SD card write
-    write_result = 0;
-    while (write_result != 3){
-      pos = fsd.position();
-      write_result = fsd.write((byte*)&buf[1], 3); // write the sample to the SD card
-      if (write_result != 3){
-        fsd.seek(pos); // go back
-      }
-    }
+
+    // send up the smample we just took
+    c.write((byte*)&buf[1], 3);
   }
-  fsd.close();
   Wire.setClock(100000);// go back to I2C standard mode
   // re-enable interrupts
 
@@ -968,28 +953,7 @@ void stream_ADC(EthernetClient c){
   ads_powerdown(true); // power down the current adc and stop any ongoing conversion
   delay(60); //worst possible case powerdown dealy (10ms longer than slowest possible conversion time)
   ads_reset(true); // reset the current adc
-
-  c.println(F("done!"));
-  c.println(F("Now playing them back:"));
-
-  counts = 0;
-  // now we can print back the values we just measured
-  fsd = SD.open(F(STREAM_FILE), FILE_READ);
-  for (uint32_t r = 0; r<n_readings; r++){
-    // reliable SD card read
-    read_result = -1;
-    while (read_result != 3){
-      pos = fsd.position();
-      read_result = fsd.readBytes((byte*) buf, 3);
-      if (read_result != 3){
-        fsd.seek(pos); // go back
-      }
-    }
-    c.write((byte*) buf, 3);
-  }
-  fsd.close();
 }
-#endif //USE_SD
 #endif // NOT ADS1015
 
 uint8_t setup_MCP(void){
