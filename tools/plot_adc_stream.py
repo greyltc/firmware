@@ -51,20 +51,11 @@ with MyTelnet(HOST) as tn:
     version_message = tn.read_response()
     print(f"Got version request response: {version_message}")
 
-    # send the capture command
-    tn.send_cmd('stream')
-    tn.read_until(b'interval...')
-    print('\aCapturing waveform...', end='', flush=True)
-    tn.read_until(b'done!')
-    print('done!')
+    tn.send_cmd('stream')  # send the capture command
+    tn.read_until(b'interval...')  # get the stream start message
+    print('\aStreaming waveform...', end='', flush=True)
 
-    tn.read_until(b'back:\r\n')
-    print('Reading back waveform data...', end='', flush=True)
-
-    start = time.time()
     raw_stream = sock_read_until(tn.sock, b'ADC streaming complete.').strip(b'ADC streaming complete.')
-    end = time.time()
-    print(end - start)
 
     print('done!')
     leftover = tn.read_response()  # get the prompt
@@ -72,12 +63,19 @@ with MyTelnet(HOST) as tn:
     # close/cleanup the connection
     tn.send_cmd('close')  # not strictly needed
 
-sam_len = 3  # number of bytes per sample
+sam_len = 4  # number of bytes per sample
 raw_samples = [raw_stream[i*sam_len:i*sam_len+sam_len] for i in range(len(raw_stream)//sam_len)]
-counts = [int.from_bytes(raw_samples[i], byteorder='big', signed=True) for i in range(len(raw_samples))]
+counts = [int.from_bytes(raw_samples[i][1:4], byteorder='big', signed=True) for i in range(len(raw_samples))]
+diff = numpy.array([int(raw_samples[i][0]) for i in range(len(raw_samples))])
+misses = sum(diff-1)
+if misses == 0:
+    print("No samples missed!")
+else:
+    print(f"WARNING: {misses} samples missed!")
+
 v = numpy.array(counts) * ONE_LSB
-t = numpy.array(range(len(raw_samples)))*dt
-plt.plot(t, v)
+t = (numpy.cumsum(diff)-1) * dt
+plt.plot(t, v, marker='.')
 plt.ylabel('Voltage [V]')
 plt.xlabel('Time [s]')
 plt.show()

@@ -541,6 +541,9 @@ void command_handler(EthernetClient c, String cmd){
     }
 #ifndef ADS1015
   } else if (cmd.equals("stream")){ //stream sample data from the ADC
+    c.print(F("Streaming "));
+    c.print(10000);
+    c.print(F(" ADC samples on a 505.859375 microsecond interval..."));
     stream_ADC(c);
     c.println(F("ADC streaming complete."));
 #endif //ADS1015
@@ -912,39 +915,50 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
 // stream data from the ADC
 void stream_ADC(EthernetClient c){
   static const int32_t n_readings = 10000; // the number of readings to stream into the file
-  c.print(F("Recording "));
-  c.print(n_readings);
-  c.print(F(" voltage values to the SD card on a 505.859375 microsecond interval..."));
-  c.println(F("done!"));
-  c.println(F("Now playing them back:"));
   volatile byte buf[4] = {0x00}; // buffer for ADC comms
   volatile byte last_counter_value = 0x00;
   volatile byte this_counter_value = 0x00;
+  volatile uint8_t diff = 0x04;
 
   // setup ADS
   ads_write(true, 2, B1<<6); //DCNT=1, data counter enable
   ads_write(true, 0, B1011 << 4); //that's one photodiode (AINp=Ain3, AINn=AVSS) and B1010 is the other one
   ads_write(true, 1, B11011000); //CM=1, MODE=1, DR=110, 2k samples/sec continuously
   ads_start_sync(true);
-  delayMicroseconds(52); // datasheet says the first conversion starts 105 clock cycles after START/SYNC (in turbo mode when t_clk=1/2.048 MHz)
-  
+
   // disable interrupts
-  Wire.setClock(400000);// need I2C fast mode here to keep up with the ADC sample rate
+  Wire.setClock(400000);// need I2C fast mode plus here to keep up with the ADC sample rate
+  delayMicroseconds(52); // datasheet says the first conversion starts 105 clock cycles after START/SYNC (in turbo mode when t_clk=1/2.048 MHz)
   for (uint32_t s = 0; s<n_readings; s++){
     while (last_counter_value == this_counter_value){ // keep looking for new data
       Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
       Wire.write(ADS122C04_RDATA_CODE);
       if (Wire.endTransmission(false) == 0){
-        Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, (uint8_t) 4);
-        Wire.readBytes((byte*)buf, 4);
+        Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, 4);
+        buf[0] = Wire.read();
+        buf[1] = Wire.read();
+        buf[2] = Wire.read();
+        buf[3] = Wire.read();
         this_counter_value = buf[0];
       }
-      delayMicroseconds(20); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
+
+      //buf[0] = (uint8_t) (buf[0] - last_counter_value);
+
+      
+//      if (Wire.endTransmission(false) == 0){
+//        Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, (uint8_t) 4);
+//        Wire.readBytes((byte*)buf, 4);
+//        this_counter_value = buf[0];
+//      }
+      //delayMicroseconds(10); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
     }
+    diff = this_counter_value - last_counter_value;
+    buf[0] = diff;
     last_counter_value = this_counter_value; // remember what the last sample counter value was
 
-    // send up the smample we just took
-    c.write((byte*)&buf[1], 3);
+    // send up the sample we just took
+    //c.write((byte*)&buf[1], 3);
+    c.write((byte*)&buf[0], 4);
   }
   Wire.setClock(100000);// go back to I2C standard mode
   // re-enable interrupts
