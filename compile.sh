@@ -7,4 +7,5 @@
 
 cd mainArduino
 arduino-cli compile -v -o build/mutovis_firmware -b arduino:avr:mega .
+#arduino-cli compile --show-properties -v -o build/mutovis_firmware -b arduino:avr:mega .
 rm -rf /tmp/arduino-*

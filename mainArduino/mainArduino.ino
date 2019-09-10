@@ -29,12 +29,11 @@
 #include <SPI.h>
 
 #include <Ethernet.h>
-// NOTE: the standard ethernet library uses an spi clock speed that's too slow for us
-// normally, the ethernet library operates SPI at a "safe" clock speed:
+// NOTE: the standard ethernet library uses a very conservative spi clock speed:
 // #define SPI_ETHERNET_SETTINGS SPISettings(14000000, MSBFIRST, SPI_MODE0)
-// we can (and must to keep up with the ADC) go faster, so we should have
+// testing shows this is enough to keep up with ADC streaming, but in case later it's not,
+// set the following in Arduino/libraries/Ethernet/src/utility/w5100.h
 // #define SPI_ETHERNET_SETTINGS SPISettings(30000000, MSBFIRST, SPI_MODE0)
-// set in Arduino/libraries/Ethernet/src/utility/w5100.h
 
 #include <Wire.h>
 #ifdef USE_SD
@@ -348,7 +347,7 @@ volatile int32_t adcCounts;
 const int max_ethernet_clients = 8;
 EthernetClient clients[max_ethernet_clients];
 
-const int cmd_buf_len = 10;
+const int cmd_buf_len = 20;
 volatile char cmd_buf[cmd_buf_len] = { 0x00 };
 String cmd = String("");
 volatile bool half_hour_action_done = false;
@@ -540,11 +539,12 @@ void command_handler(EthernetClient c, String cmd){
       ERR_MSG
     }
 #ifndef ADS1015
-  } else if (cmd.equals("stream")){ //stream sample data from the ADC
+  } else if (cmd.startsWith(F("stream")) & (cmd.length() >= 7)){ //stream sample data from the ADC
+    cmd.remove(0,6); // remove the word stream
     c.print(F("Streaming "));
-    c.print(10000);
+    c.print(cmd.toInt());
     c.print(F(" ADC samples on a 505.859375 microsecond interval..."));
-    stream_ADC(c);
+    stream_ADC(c, cmd.toInt());
     c.println(F("ADC streaming complete."));
 #endif //ADS1015
   } else if (cmd.equals("?") | cmd.equals("help")){ //help request command
@@ -912,63 +912,77 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
   return(reg_value);
 }
 
+//#pragma GCC optimize ("-O3")
+//#pragma GCC push_options
 // stream data from the ADC
-void stream_ADC(EthernetClient c){
-  static const int32_t n_readings = 10000; // the number of readings to stream into the file
+void stream_ADC(EthernetClient c, uint32_t n_readings){
   volatile byte buf[4] = {0x00}; // buffer for ADC comms
   volatile byte last_counter_value = 0x00;
   volatile byte this_counter_value = 0x00;
-  volatile uint8_t diff = 0x04;
+  volatile int bytes_to_read = 0;
+  //volatile uint8_t diff = 0x04;
+  volatile uint32_t i = 0;
+  volatile uint32_t j = 0;
 
   // setup ADS
   ads_write(true, 2, B1<<6); //DCNT=1, data counter enable
   ads_write(true, 0, B1011 << 4); //that's one photodiode (AINp=Ain3, AINn=AVSS) and B1010 is the other one
-  ads_write(true, 1, B11011000); //CM=1, MODE=1, DR=110, 2k samples/sec continuously
+  ads_write(true, 1, B11011000); //CM=1, MODE=1, DR=110 for 2k samples/sec continuously
   ads_start_sync(true);
 
-  // disable interrupts
-  Wire.setClock(400000);// need I2C fast mode plus here to keep up with the ADC sample rate
+  
+  Wire.setClock(400000);// need I2C fast mode here to keep up with the ADC sample rate
+  //Wire.setClock(600000);// need I2C fast mode here to keep up with the ADC sample rate
   delayMicroseconds(52); // datasheet says the first conversion starts 105 clock cycles after START/SYNC (in turbo mode when t_clk=1/2.048 MHz)
-  for (uint32_t s = 0; s<n_readings; s++){
-    while (last_counter_value == this_counter_value){ // keep looking for new data
-      Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
-      Wire.write(ADS122C04_RDATA_CODE);
+  //noInterrupts(); // disable interrupts
+  for (i = 0; i<n_readings; i++){
+    while (last_counter_value == buf[0]){ // keep looking for new data
+      Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS); // ~13.3us
+      Wire.write(ADS122C04_RDATA_CODE); // ~13.3us
       if (Wire.endTransmission(false) == 0){
-        Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, 4);
-        buf[0] = Wire.read();
-        buf[1] = Wire.read();
-        buf[2] = Wire.read();
-        buf[3] = Wire.read();
-        this_counter_value = buf[0];
+        bytes_to_read = Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, 4, true);  // ~13.3us
+        if(bytes_to_read == 4){
+          while (Wire.available() < 4){};
+          buf[0] = Wire.read(); // the counter value, ~13.3us
+          buf[1] = Wire.read(); // sample msb, ~13.3us
+          buf[2] = Wire.read(); // sample nsb, ~13.3us
+          buf[3] = Wire.read(); // sample lsb, ~13.3us
+        } else {
+          Wire.endTransmission(true);
+          while (Wire.available() > 0){
+            Wire.read();
+          }
+        }
+      } else {
+        Wire.endTransmission(true);
+        while (Wire.available() > 0){
+          Wire.read();
+        }
       }
-
-      //buf[0] = (uint8_t) (buf[0] - last_counter_value);
-
-      
-//      if (Wire.endTransmission(false) == 0){
-//        Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, (uint8_t) 4);
-//        Wire.readBytes((byte*)buf, 4);
-//        this_counter_value = buf[0];
-//      }
+      //this_counter_value = buf[0];
       //delayMicroseconds(10); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
     }
-    diff = this_counter_value - last_counter_value;
-    buf[0] = diff;
-    last_counter_value = this_counter_value; // remember what the last sample counter value was
+    //diff = this_counter_value - last_counter_value;
+    //buf[0] = diff;  // send up the counter difference (should be 1 if we didn't miss a sample)
+    last_counter_value = buf[0]; // remember what the last sample counter value was
 
-    // send up the sample we just took
-    //c.write((byte*)&buf[1], 3);
-    c.write((byte*)&buf[0], 4);
+    // send up the counter difference and sample we just took
+    c.write((byte*)&buf[0], 4); //~2us
+    //c.flush(); // this is suuuuper slow!
+    //delayMicroseconds(10); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
   }
+  //interrupts();// re-enable interrupts
   Wire.setClock(100000);// go back to I2C standard mode
-  // re-enable interrupts
+
 
   // clean up ADS
   ads_powerdown(true); // power down the current adc and stop any ongoing conversion
   delay(60); //worst possible case powerdown dealy (10ms longer than slowest possible conversion time)
   ads_reset(true); // reset the current adc
 }
+//#pragma GCC pop_options
 #endif // NOT ADS1015
+
 
 uint8_t setup_MCP(void){
   // pulse CS to clear out weirdness from startup
@@ -1005,4 +1019,24 @@ uint8_t setup_MCP(void){
     }
   }
   return (connected_devices);
+}
+
+uint16_t crc16(char *ptr, int count)
+{
+   uint16_t  crc;
+   char i;
+   crc = 0xffff;
+   while (--count >= 0)
+   {
+      crc = crc ^ (uint16_t) *ptr++ << 8;
+      i = 8;
+      do
+      {
+         if (crc & 0x8000)
+            crc = crc << 1 ^ 0x1021;
+         else
+            crc = crc << 1;
+      } while(--i);
+   }
+   return (crc);
 }
