@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import socket
 import argparse
 import time
+import sys
 
 PROMPT = b'>>> '  # the firmware's prompt
 EOL = b'\r\n'  # client-->server transmission line ending the firmware expects
@@ -19,6 +20,7 @@ ADC_BITS = 24
 ADC_VREF = 2.048  # volts
 ONE_LSB = ADC_VREF/(2**(ADC_BITS-1))  # volts per count
 dt = 1036/2.048e6  # sample period
+custom_timeout = 5 # 500 ms should pass until we give up on getting data we want
 
 parser = argparse.ArgumentParser(description=f'Stream from ADC with sample interval {dt} [s]')
 parser.add_argument('-s', '--server-hostname', type=str, default="WIZnet111785.desk_lan",
@@ -38,21 +40,25 @@ else:
 
 
 def sock_read_until(s, match):
+    old_tout = s.gettimeout()
+    s.settimeout(custom_timeout)
     matched = False
     buffer = bytes([])
     while (matched is False):
         try:
             buffer = buffer + s.recv(1)
         except socket.timeout:
+            print("WARNING: Data reception timeout")
             break
         if buffer.endswith(match):
             matched = True
+    s.settimeout(old_tout)
     return buffer
 
 
 class MyTelnet(Telnet):
     def read_response(self):
-        return self.read_until(PROMPT).rstrip(PROMPT).decode().strip()
+        return self.read_until(PROMPT,timeout=custom_timeout).rstrip(PROMPT).decode().strip()
 
     def send_cmd(self, cmd):
         return self.write(cmd.encode()+EOL)
@@ -90,19 +96,22 @@ sam_len = 4  # number of bytes per sample
 raw_samples = [raw_stream[i*sam_len:i*sam_len+sam_len] for i in range(len(raw_stream)//sam_len)]
 counts = numpy.array([int.from_bytes(raw_samples[i][1:4], byteorder='big', signed=True) for i in range(len(raw_samples))])
 counter = numpy.array([int(raw_samples[i][0]) for i in range(len(raw_samples))], dtype=numpy.uint8)
+#crcs = numpy.array([int.from_bytes(raw_samples[i][4:6],byteorder=sys.byteorder,signed=False) for i in range(len(raw_samples))])
 diff = numpy.diff(counter).astype(int)  # differences between the counter values
 diff = numpy.concatenate(([1], diff))  # left append a 1 for the first value
 misses = sum(diff-1)  # count up the missed samples
 got_n_samples = len(raw_samples)
-if misses == 0:
+n_missed = args.num_samples - got_n_samples
+if misses == 0 and got_n_samples == args.num_samples:
     print(f"Got {got_n_samples} samples with no misses!")
 else:
-    print(f"WARNING: Got {got_n_samples} with {misses} samples skipped!")
+    print(f"WARNING: Got {got_n_samples} with {misses} sample(s) skipped! (that's {n_missed} less than expected)")
 
 v = counts * ONE_LSB
 t = (numpy.cumsum(diff)-1) * dt
-print(f"Plotting from time t=0 to t={t.max()} seconds")
-plt.plot(t, v, marker='.')
-plt.ylabel('Voltage [V]')
-plt.xlabel('Time [s]')
-plt.show()
+if got_n_samples > 0:
+    print(f"Plotting from time t=0 to t={t.max()} seconds")
+    plt.plot(t, v, marker='.')
+    plt.ylabel('Voltage [V]')
+    plt.xlabel('Time [s]')
+    plt.show()
