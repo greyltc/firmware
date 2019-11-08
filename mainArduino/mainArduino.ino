@@ -983,7 +983,7 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
   delay(60); //worst possible case powerdown dealy (10ms longer than slowest possible conversion time)
   ads_reset(true); // reset the current adc
 }
-
+#endif // NOT ADS1015
 
 uint8_t setup_MCP(void){
   // pulse CS to clear out weirdness from startup
