@@ -30,7 +30,7 @@
 #include <SPI.h>
 #endif//BIT_BANG_SPI
 //#include <FastCRC.h>
-#include <avr/crc16.h>
+#include <avr/crc16.h>  // for _crc_xmodem_update
 
 #include <Ethernet.h>
 // NOTE: the standard ethernet library uses a very conservative spi clock speed:
@@ -921,23 +921,15 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
   return(reg_value);
 }
 
-//#pragma GCC optimize ("-O3")
-//#pragma GCC push_options
-// stream data from the ADC
 void stream_ADC(EthernetClient c, uint32_t n_readings){
-//void stream_ADC(void){
-  //uint32_t n_readings = 988418;
   static const int msg_len = 6; // length of the ADC stream message
-  //static const int max_retries = 10; // maximum number of crc failure retries
   volatile uint8_t buf[msg_len] = {0x00}; // buffer for ADC comms
   volatile uint8_t last_counter_value = 0x00;
-//  volatile uint8_t this_counter_value = 0x00;
   volatile int bytes_to_read = 0;
   volatile uint32_t adc_periods = 0;
   volatile uint16_t adc_crc = 0;
   volatile uint16_t adc_crc_running = 0x00;
   
-
   // setup ADS
   ads_write(true, 0, B1011 << 4); // set MUX. B1011 is for one photodiode (AINp=Ain3, AINn=AVSS). B1010 would be for the other one
   ads_write(true, 1, B11011000); // CM=1, MODE=1, DR=110 for 2k samples/sec continuously
@@ -945,38 +937,15 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
   ads_start_sync(true);
 
   Wire.setClock(400000);// need I2C fast mode here to keep up with the ADC sample rate
-  //Wire.setClock(800000);// need I2C fast mode here to keep up with the ADC sample rate
   delayMicroseconds(52); // datasheet says the first conversion starts 105 clock cycles after START/SYNC (in turbo mode when t_clk=1/2.048 MHz)
-  //noInterrupts(); // disable interrupts
   while (adc_periods < n_readings){
-  //for (i = 0; i<n_readings; i++){
-    //retries = 0;
     
-    while (last_counter_value == buf[0]){ // poll for new sample, probably this needs a watchdog
-      //delayMicroseconds(15);
-      Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS); // ~13.3us
-      //delayMicroseconds(15);
-      
-      if (Wire.write(ADS122C04_RDATA_CODE) == 1){ // ~13.3us
-        //delayMicroseconds(15);
-        //digitalWrite(LED_pin, !digitalRead(LED_pin));
-        //wdt_enable(WDTO_1S);
+    while (last_counter_value == buf[0]){ // poll for new sample
+      Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
+      if (Wire.write(ADS122C04_RDATA_CODE) == 1){
         if (Wire.endTransmission(false) == 0){
-          //digitalWrite(LED_pin, !digitalRead(LED_pin));
-          //delayMicroseconds(15);
-          //delayMicroseconds(2);
-          //digitalWrite(LED_pin, HIGH);
-          //wdt_enable(WDTO_1S);
-          //noInterrupts();
           bytes_to_read = Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, msg_len, true);  // ~13.3us
-          //interrupts();
-          //wdt_disable ();
-          //digitalWrite(LED_pin, LOW);
-          //delayMicroseconds(1);
           if(bytes_to_read == msg_len){
-            //digitalWrite(LED_pin, !digitalRead(LED_pin));
-            //while (Wire.available() < msg_len){};
-            digitalWrite(LED_pin, HIGH);
             buf[0] = Wire.read();
             adc_crc_running = _crc_xmodem_update(0xffff, buf[0]);
             buf[1] = Wire.read();
@@ -985,65 +954,35 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
             adc_crc_running = _crc_xmodem_update(adc_crc_running, buf[2]);
             buf[3] = Wire.read();
             adc_crc_running = _crc_xmodem_update(adc_crc_running, buf[3]);
+            // continuting to compute crc and checking for zero seems elegant, but it's a bit slower
             //adc_crc_running = _crc_xmodem_update(adc_crc_running, Wire.read());
             //adc_crc_running = _crc_xmodem_update(adc_crc_running, Wire.read());
-            //buf[4] = Wire.read();
-            //buf[5] = Wire.read();
-            //Wire.readBytes((uint8_t*)buf, msg_len-2); // read the first four message bytes
-            //adc_crc = 0;
+
             // read the crc bytes and assign them in reverse
             adc_crc = (Wire.read() << 8);
             adc_crc |= Wire.read();
-            //Wire.readBytes((uint8_t*)&adc_crc+1, 1);
-            //Wire.readBytes((uint8_t*)&adc_crc, 1);
   
             // computing over all bytes and checking for zero CRC result is slower than this by a few 10s of us :-P
-
-            //if (CRC16.ccitt(buf, msg_len-2) != adc_crc){ // ~17 us
             //if (adc_crc_running != 0){
             if (adc_crc_running != adc_crc){ // ~17 us
               buf[0] = last_counter_value; // crc check failure so force retransmission no matter what
-            }
-            digitalWrite(LED_pin, LOW);
-  
-          }
-        }
-      }
-      //this_counter_value = buf[0];
-      //delayMicroseconds(10); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
-    }
-    //diff = this_counter_value - last_counter_value;
-    //buf[0] = diff;  // send up the counter difference (should be 1 if we didn't miss a sample)
+            } // end crc check
+          } // end message length check
+        } // end Wire.endTransmission check
+      } // end Wire.write check
+    } // end counter change check
     adc_periods += (uint8_t)(buf[0] - last_counter_value); // keep track of how many time periods the ADC has seen
     last_counter_value = buf[0]; // remember what the last sample counter value was
-
-    // send up the counter difference and sample we just took
-    //c.write((byte*)buf, msg_len); //~2us
-    //digitalWrite(LED_pin, !digitalRead(LED_pin));
-    //digitalWrite(LED_pin, HIGH);
-    
-    //c.write(buf[0]);
-    //c.write(buf[1]);
-    //c.write(buf[2]);
-    //c.write(buf[3]);
     digitalWrite(LED2_pin, HIGH);
     c.write((uint8_t*)buf, 4) ; //~268us
     digitalWrite(LED2_pin, LOW);
-    //c.flush(); // this is suuuuper slow!
-    //delayMicroseconds(10); // datasheet says the conversion takes 1036 clock cycles at t_clk = 1/2.048MHz (that's 505.859375 microseconds)
-    //digitalWrite(LED_pin, LOW);
-  }
-  //c.flush(); //wait for the transmission to complete now
-  //interrupts();// re-enable interrupts
+  } // end number of sample periods check
   Wire.setClock(100000);// go back to I2C standard mode
-
   // clean up ADS
   ads_powerdown(true); // power down the current adc and stop any ongoing conversion
   delay(60); //worst possible case powerdown dealy (10ms longer than slowest possible conversion time)
   ads_reset(true); // reset the current adc
 }
-//#pragma GCC pop_options
-#endif // NOT ADS1015
 
 
 uint8_t setup_MCP(void){
@@ -1081,67 +1020,4 @@ uint8_t setup_MCP(void){
     }
   }
   return (connected_devices);
-}
-
-// CRC-16-CCITT computation (0xffff start and 0x1021 polynomial) ~100us!
-//uint16_t crc16(char *ptr, int count)
-//{
-//   volatile uint16_t crc = 0xffff;
-//   volatile char i;
-//   while (--count >= 0)
-//   {
-//      crc = crc ^ (uint16_t) *ptr++ << 8;
-//      i = 8;
-//      do
-//      {
-//         if (crc & 0x8000)
-//            crc = crc << 1 ^ 0x1021;
-//         else
-//            crc = crc << 1;
-//      } while(--i);
-//   }
-//   return (crc);
-//}
-
-// CRC-16-CCITT computation (0xffff start and 0x1021 polynomial) ~34us!
-static unsigned short crc16(const unsigned char *buf, int sz)
-{
-  unsigned short crc = 0xffff;
-  int i;
-  while (--sz >= 0) {
-    crc ^= (unsigned short) *buf++ << 8;
-    for (i = 0; i < 8; i++)
-      if (crc & 0x8000)
-        crc = crc << 1 ^ 0x1021;
-      else
-        crc <<= 1;
-  }
-  return crc;
-}
-
-// very slow :-(
-static unsigned short crc162(const unsigned char *buf, int sz)
-{
-  unsigned short crc = 0xffff;
-  int i = 0;
-  while (--sz >= 0) {
-    crc = crc16b(crc, buf[i]);
-    i++;
-  }
-  return crc;
-}
-
-// for rolling crc
-static unsigned short crc16b(uint16_t crc, const uint8_t b)
-{
-  volatile int i;
-  crc ^= (uint16_t) b << 8;
-  for (i = 0; i < 8; i++){
-    if (crc & 0x8000) {
-    crc = crc << 1 ^ 0x1021;
-    } else {
-      crc <<= 1;
-    }
-  }
-  return crc;
 }
