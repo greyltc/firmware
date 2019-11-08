@@ -16,10 +16,10 @@
 //#define NO_LED
 
 // uncomment and modify STATIC_IP to disable DHCP client mode
-#define STATIC_IP { 10, 42, 0, 54 }
+//#define STATIC_IP { 10, 42, 0, 54 }
 
 // when ADS1015 is defined, the build will be for the old board with ADS1015, otherwise it'll be for ADS122C04
-#define ADS1015
+//#define ADS1015
 
 // ====== end user editable config ======
 
