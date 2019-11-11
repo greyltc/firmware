@@ -1,20 +1,16 @@
-#define FIRMWARE_VER "3b583b6"
-
-#include <SPI.h>
-#include <Ethernet.h>
-#include <Wire.h>
-
-// do something like this to enter the control interface:
-// socat -,rawer,echo,escape=0x03 TCP:10.42.0.54:23
-
 // ====== start user editable config ======
+
+#define FIRMWARE_VER "daa3f10"
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
-//#define BIT_BANG_SPI
+#define BIT_BANG_SPI
  
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
 //#define DEBUG
+
+// when USE_SD is defined the we'll be ready to use the SD card
+//#define USE_SD
 
 // when NO_LED is defined, the LED is disabled so that it doesn't interfere with SPI SCK on boards like UNO
 //#define NO_LED
@@ -27,55 +23,96 @@
 
 // ====== end user editable config ======
 
+// FYI-- do something like this to enter the control interface:
+// telnet 10.42.0.54
+
+#ifndef BIT_BANG_SPI
+#include <SPI.h>
+#endif//BIT_BANG_SPI
+//#include <FastCRC.h>
+#include <avr/crc16.h>  // for _crc_xmodem_update
+
+#include <Ethernet.h>
+// NOTE: the standard ethernet library uses a very conservative spi clock speed:
+// #define SPI_ETHERNET_SETTINGS SPISettings(14000000, MSBFIRST, SPI_MODE0)
+// testing shows this is enough to keep up with ADC streaming, but in case later it's not,
+// set the following in Arduino/libraries/Ethernet/src/utility/w5100.h
+// #define SPI_ETHERNET_SETTINGS SPISettings(30000000, MSBFIRST, SPI_MODE0)
+
+//#include <Wire.h>
+#include "Wire.h" // today I need my fixed Wire library, https://github.com/greyltc/ArduinoCore-avr/tree/issue%2342
+#ifdef USE_SD
+#include <SD.h>
+#endif //USE_SD
+#ifdef ADS1015
+#include <Adafruit_ADS1015.h>
+#endif//ADS1015
+
 // help for commands
-const char help_0a[] PROGMEM = "v";
-const char help_0b[] PROGMEM = "diplay firmware revision";
+const char help_v_a[] PROGMEM = "v";
+const char help_v_b[] PROGMEM = "display firmware revision";
 
-const char help_1a[] PROGMEM = "adc";
-const char help_1b[] PROGMEM = "\"adcX\" returns count of channel X (can be [0,7]), just \"adc\" returns counts of all channels";
+const char help_adc_a[] PROGMEM = "adc";
+const char help_adc_b[] PROGMEM = "\"adcX\" returns count of channel X (can be [0,7]), just \"adc\" returns counts of all channels";
 
-const char help_2a[] PROGMEM = "s";
-const char help_2b[] PROGMEM = "\"sXY\", selects pixel Y on substrate X, just \"s\" disconnects all pixels";
+const char help_s_a[] PROGMEM = "s";
+const char help_s_b[] PROGMEM = "\"sXY\", selects pixel Y on substrate X, just \"s\" disconnects all pixels";
 
-const char help_3a[] PROGMEM = "c";
-const char help_3b[] PROGMEM = "\"cX\", checks that MUX X is connected";
+const char help_c_a[] PROGMEM = "c";
+const char help_c_b[] PROGMEM = "\"cX\", checks that MUX X is connected";
 
-const char help_4a[] PROGMEM = "d";
-const char help_4b[] PROGMEM = "\"dX\" selects board X's type indicator resistor and returns associated adc counts";
+const char help_d_a[] PROGMEM = "d";
+const char help_d_b[] PROGMEM = "\"dX\" selects board X's type indicator resistor and returns associated adc counts";
 
-const char help_5a[] PROGMEM = "p";
-const char help_5b[] PROGMEM = "\"pX\" returns photodiode X's adc counts";
+const char help_p_a[] PROGMEM = "p";
+const char help_p_b[] PROGMEM = "\"pX\" returns photodiode X's adc counts";
 
-const char help_6a[] PROGMEM = "a";
-const char help_6b[] PROGMEM = "\"a\" returns the analog voltage supply span as read by each of the adcs";
+const char help_a_a[] PROGMEM = "a";
+const char help_a_b[] PROGMEM = "\"a\" returns the analog voltage supply span as read by each of the adcs";
 
-const char help_7a[] PROGMEM = "disconnect or close or logout or exit or quit";
-const char help_7b[] PROGMEM = "ends session";
+#ifndef ADS1015
+const char help_stream_a[] PROGMEM = "stream";
+const char help_stream_b[] PROGMEM = "\"stream\" streams ADC data";
+#endif //ADS1015
 
-const char help_8a[] PROGMEM = "? or help";
-const char help_8b[] PROGMEM = "print this help";
+const char help_exit_a[] PROGMEM = "disconnect or close or logout or exit or quit";
+const char help_exit_b[] PROGMEM = "ends session";
+
+const char help_help_a[] PROGMEM = "? or help";
+const char help_help_b[] PROGMEM = "print this help";
 
 const char* const help[] PROGMEM  = {
-  help_0a, help_0b,
-  help_1a, help_1b,
-  help_2a, help_2b,
-  help_3a, help_3b,
-  help_4a, help_4b,
-  help_5a, help_5b,
-  help_6a, help_6b,
-  help_7a, help_7b,
-  help_8a, help_8b
+  help_v_a, help_v_b,
+  help_adc_a, help_adc_b,
+  help_s_a, help_s_b,
+  help_c_a, help_c_b,
+  help_d_a, help_d_b,
+  help_p_a, help_p_b,
+  help_a_a, help_a_b,
+#ifndef ADS1015
+  help_stream_a, help_stream_b,
+#endif //ADS1015
+  help_exit_a, help_exit_b,
+  help_help_a, help_help_b
 };
 
 //a helper for retrieving the strings from PROGMEM
 #define PGM2STR(array, address)  (__FlashStringHelper*)pgm_read_word(array + address)
 
+// no operation
+#define NOP __asm__ __volatile__ ("nop\n\t")
+
 int nCommands = (sizeof(help)/sizeof(help[0]))/2;
 
-#define ERR_MSG c.print(F("ERROR: Got bad command '")); c.print(cmd); c.println(F("'"));
+volatile char err_byte[3]; // for holding a null terminated hex string for one single command byte for error message printing
+#define ERR_MSG c.print(F("ERROR: Got bad a command byte array: 0x")); for (int i=0;i<cmd_buf_len;i++){ sprintf(err_byte, "%02x", (byte) cmd_buf[i]); c.print((char*) err_byte);} c.println(F("")); //sizeof cmd,
+
+#ifdef USE_SD
+// name of the file to save to the SD card
+#define STREAM_FILE "adcbytes.bin"
+#endif //USE_SD
 
 #ifdef ADS1015
-#include <Adafruit_ADS1015.h>
 Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #else
 //ADS122C04 definitions
@@ -88,7 +125,8 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #define ADS122C04_RREG_CODE 0x20
 #define ADS122C04_WREG_CODE 0x40
 #define ADS122C04_INTERNAL_REF 2.048
-#define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, 20 samples/sec, with 0.99ms headroom
+#define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, ~20 samples/sec. has 0.99ms headroom. actual time is 51192 normal mode clock cycles (1.024 MHz)
+#define ADS122C04_CONVERSION_TIME_TURBO 506 // in microseconds, for the fastest possible continuous sample rate: turbo mode, ~2k samples/sec. actual time is 1036 turbo mode clock cycles (2.048 MHz). has 0.140625 microseconds headroom
 #endif
 
 //some definitions for the MCP23S17
@@ -132,10 +170,16 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 const unsigned int HARDWARE_SPI_CS = 53; // arduino pin that goes (in hardware) with the SPI bus (must be set output)
 #ifndef NO_LED
 const unsigned int LED_pin = 13; // arduino pin for alive LED
+const unsigned int LED2_pin = 12; // arduino pin for LED2
 #endif
 
 const unsigned int ETHERNET_SPI_CS = 10; // arduino pin that's connected to the ethernet shield's W5500 CS line
 const unsigned int SD_SPI_CS = 4; // arduino pin that's connected to the ethernet shield's SD card CS line
+
+// define the command termination style we'll use
+//const char cmd_terminator[1] = { 0x0A }; // LF
+//const char cmd_terminator[1] = { 0x0D }; // CR
+const char cmd_terminator[2] = { 0x0D, 0x0A }; // EOL (aka CRLF)
 
 #ifdef BIT_BANG_SPI
 // port expander software SPI bus pin definitions
@@ -165,7 +209,19 @@ SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
 // setup telnet server
 EthernetServer server(serverPort);
 
+//FastCRC16 CRC16;
+
+#ifdef USE_SD
+// file handle for streaming ADC data to SD card
+File fsd;
+#endif //USE_SD
+
 void setup() {
+  #ifdef DEBUG
+  Serial.begin(115200); // serial port for debugging  
+  Serial.println(F("________Begin Setup Function________"));
+  #endif
+
   digitalWrite(SD_SPI_CS, HIGH); //deselect
   pinMode(SD_SPI_CS, OUTPUT);
   
@@ -185,12 +241,10 @@ void setup() {
   pinMode(PE_MISO_PIN, INPUT);
   #endif
 
-  #ifdef DEBUG
-  Serial.begin(115200); // serial port for debugging  
-  #endif
-
   Wire.begin(); // for I2C
 
+
+  // ============= ethernet setup ============== 
   #ifdef DEBUG
   Serial.println(F("Getting IP via DHCP..."));
   #endif
@@ -210,12 +264,74 @@ void setup() {
   Serial.print(F(":"));
   Serial.print(serverPort);
   Serial.println(F(" ..."));
-  #endif
+  #endif // DEBUG
+
+  // ============= SD card setup ==============
+  #ifdef USE_SD
+  #ifdef DEBUG
+  Serial.print(F("Initializing SD card..."));
+  #endif // DEBUG
+
+  if (!SD.begin(SD_SPI_CS)) {
+	  #ifdef DEBUG
+    Serial.println(F("SD initialization failed!"));
+    #endif // DEBUG
+    while (1); // chill here forever if SD card init failed
+  } else { // SD card init worked
+    #ifdef DEBUG
+    Serial.println(F("complete."));
+    #endif // DEBUG
+
+    fsd = SD.open(F(STREAM_FILE), FILE_WRITE);
+    if (fsd) {  // if the file opened okay, write to it
+      #ifdef DEBUG
+      Serial.print(F("Doing test write of 'testing 1, 2, 3.' to adcbytes.bin on SD card..."));
+      #endif // DEBUG
+      
+      fsd.println(F("testing 1, 2, 3.")); // expecting 17 (or 18) bytes to be written here
+
+      #ifdef DEBUG
+      Serial.println(F("done."));
+      #endif // DEBUG
+      fsd.close(); // close the file
+    } else {
+      #ifdef DEBUG
+      Serial.println(F("error opening "STREAM_FILE));  // if the file didn't open, print an error
+      #endif // DEBUG
+    } // section for if the SD card file opened for writing properly
+    
+    #ifdef DEBUG
+    fsd = SD.open(F(STREAM_FILE), FILE_READ);
+    if (fsd) {  // if the file opened okay, read it
+      Serial.println(F("Doing test read from SD card..."));
+      
+      int can_read = fsd.available();
+      
+      Serial.print(F("Looks like we can read "));
+      Serial.print(can_read);
+      Serial.println(F(" bytes from "STREAM_FILE));
+      
+      Serial.println(F("===== begin "STREAM_FILE" ====="));
+      for (int i=0; i < can_read; i++){
+        Serial.print((char)fsd.read());
+	  }
+      Serial.println(F("===== end "STREAM_FILE" ====="));
+
+      fsd.close(); // close the file
+    } else {
+      Serial.println(F("error opening "STREAM_FILE));  // if the file didn't open, print an error
+    } // section for if the SD card file opened for reading properly
+    #endif // DEBUG
+    SD.remove(F(STREAM_FILE)); // delete the testing file
+  } // SD card setup
+  #endif // USE_SD
   
   #ifndef NO_LED
   pinMode(LED_pin, OUTPUT); // to show we are working
+  pinMode(LED2_pin, OUTPUT);
   #endif
 
+  // ============= ADC setup ============== 
   delayMicroseconds(500); // wait to ensure the adc has finished powering up
   #ifdef ADS1015
   ads.begin();
@@ -226,6 +342,10 @@ void setup() {
 
   // setup the port expanders
   connected_devices = setup_MCP();
+  
+  #ifdef DEBUG
+  Serial.println(F("________End Setup Function________"));
+  #endif
 }
 
 // define some various varibles we'll use in the loop
@@ -233,12 +353,15 @@ volatile uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
 volatile int pixSetErr = ERR_GENERIC;
 volatile int32_t adcCounts;
 
-EthernetClient c;
+const int max_ethernet_clients = 8;
+EthernetClient clients[max_ethernet_clients];
 
-const int cmd_buf_len = 10;
-char cmd_buf[cmd_buf_len] = { 0 };
+const int cmd_buf_len = 20;
+volatile char cmd_buf[cmd_buf_len] = { 0x00 };
 String cmd = String("");
 volatile bool half_hour_action_done = false;
+
+// main program loop
 void loop() {
   pixSetErr = ERR_GENERIC;
   
@@ -261,150 +384,189 @@ void loop() {
   #endif
 
   // wait for a new client:
-  EthernetClient client = server.accept();
+  EthernetClient new_client = server.accept();
   
-  if (client) {
-    if (c.connected()){
-      c.print(F("Bumped by new connection"));
-      c.stop(); // kick out the old connection
+  if (new_client) {
+    for (int i = 0; i < max_ethernet_clients; i++) {
+      if (!clients[i]) {
+        new_client.print(F("You are Client Number "));
+        new_client.print(i);
+        new_client.print(F(". I am "));
+        report_firmware_version(new_client);
+
+        delay(10);  // connection garbage collection time
+        //new_client.flush();  // throw away any startup garbage bytes
+        while (new_client.available()){
+          new_client.read(); // throw away any startup garbage bytes
+        }
+        new_client.setTimeout(5000); //give the client 5 seconds to send a terminator to end the command
+
+        send_prompt(new_client);
+        // Once we "accept", the client is no longer tracked by EthernetServer
+        // so we must store it into our list of clients
+        clients[i] = new_client;
+        break;
+      } else if (i == max_ethernet_clients -1) {
+        new_client.print(F("ERROR: Maximum client limit reached. Can not accept new connection. Goodbye."));
+        new_client.stop();
+      }
+    } // new client search for loop
+  } // end new client connection if
+
+  // handle message from any client
+  for (int j = 0; j < max_ethernet_clients; j++) {
+    while (clients[j] && clients[j].available() > 0) {
+      get_cmd(cmd_buf, clients[j], cmd_buf_len);
+      cmd = String((char*)cmd_buf);
+      //cmd = c.readStringUntil(CMD_TERMINATOR);
+      cmd.toLowerCase(); //case insensative
+      clients[j].println(F(""));
+
+      // handle command
+      command_handler(clients[j], cmd);
+      send_prompt(clients[j]); // send prompt indicating that the command has been handled
     }
-    c = client;
-    c.setTimeout(5000); //give the client 5 seconds to send the 0xd to end the command
   }
+  
+  // stop any clients which disconnect
+  for (int i = 0; i < max_ethernet_clients; i++) {
+    if (clients[i] && !clients[i].connected()) {
+      clients[i].print(F("Goodbye Client Number "));
+      clients[i].print(i);
+      clients[i].println(F("."));
+      clients[i].stop();
+    }
+  } // end client disconnection check
+} // end main program loop
 
-  // if we get bytes from someone
-  if (c && c.available() > 0) {
-    //get_cmd(cmd_buf, c, 0xd, cmd_buf_len);
-    //cmd = String(cmd_buf);
-    cmd = c.readStringUntil(0xd);
-    cmd.toLowerCase(); //case insensative
-    c.println(F(""));
-    
-    if (cmd.equals("")){ //ignore empty command
-      ;
-    } else if (cmd.equals("v")){ //version request command
-      c.print(F("Firmware Version: "));
-      c.println(FIRMWARE_VER);
-    } else if (cmd.equals("a")){ //analog voltage supply span command
-      c.print(F("Analog voltage span as read by U2 (current adc): "));
-      c.print(ads_check_supply(true),6);
-      c.println(F("V"));
-      c.print(F("Analog voltage span as read by U5 (voltage adc): "));
-      c.print(ads_check_supply(false),6);
-      c.println(F("V"));
-    } else if (cmd.equals("s")){ //pixel deselect command
-      mcp23x17_all_off();
-    } else if (cmd.startsWith("s") & (cmd.length() == 3)){ //pixel select command
-      pixSetErr = set_pix(cmd.substring(1));
-      if (pixSetErr !=0){
-        c.print(F("ERROR: Pixel selection error code "));
-        c.println(pixSetErr);
-      }
-    } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
-      uint8_t pd = cmd.charAt(1) - '0';
-      if (pd == 1 | pd == 2){
-          c.print(F("Photodiode D"));
-          c.print(pd);
-          c.print(F(" = "));
-          c.print(ads_get_single_ended(true,pd+1));
-          c.println(F(" counts"));
-      } else {
-        ERR_MSG
-      }
-    } else if (cmd.startsWith("c") & (cmd.length() == 2)){ //mux check command
-      uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
-      if ((substrate >= 0) & (substrate <= 7)){
-        bool result = mcp23x17_MUXCheck(substrate);
-        if (result){
-          c.println(F("MUX OK"));
-        } else {
-          c.println(F("MUX not found"));
-        }
-      } else {
-        ERR_MSG
-      }
-    } else if (cmd.startsWith("d") & (cmd.length() == 2)){ //pogo pin board sense divider measure command
-      uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
-      if ((substrate >= 0) & (substrate <= 7)){
-        mcp_dev_addr = substrate;
 
-        mcp_reg_value = mcp23x17_read(mcp_dev_addr, MCP_OLATA_ADDR); // read OLATA
-        mcp_reg_value |= (1 << 2); // flip on V_D_EN bit
-        mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
-        
-        c.print(F("Board "));
-        cmd.toUpperCase();
-        c.print(cmd.charAt(1));
-        cmd.toLowerCase();
-        c.print(F(" sense resistor = ")); 
-        c.print(ads_get_resistor(),0);
-        mcp_reg_value &= ~ (1 << 2); // flip off V_D_EN bit
-        mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
-        c.println(F(" Ohm"));
-      } else {
-        ERR_MSG
-      }
-    } else if (cmd.startsWith("adc")){ // adc read command
-      if (cmd.length() == 3){ //list all of the channels' counts
-        for(int i=0; i<=7; i++){
-          if ((i >= 0) & (i <= 3)){
-            c.print(F("AIN"));
-            c.print(i);
-            c.print(F(" (U2, current adc, channel "));
-            c.print(i);
-            c.print(F(") = "));
-            c.print(ads_get_single_ended(true,i));
-            c.println(F(" counts"));
-          }
-          if ((i >= 4) & (i <= 7)){
-            c.print(F("AIN"));
-            c.print(i);
-            c.print(F(" (U5, voltage adc, channel "));
-            c.print(i-4);
-            c.print(F(") = "));
-            c.print(ads_get_single_ended(false,i-4));
-            c.println(F(" counts"));
-          }
-        }
-      } else if (cmd.length() == 4){
-        int chan = cmd.charAt(3) - '0'; // 0-3 are mapped to U2's (current adc) chans AIN0-3, 4-7 are mapped to U5's (voltage adc) chans AIN0-3
-        if ((chan >= 0) & (chan <= 3)){  
-          c.print(F("AIN"));
-          c.print(chan);
-          c.print(F("= "));
-          c.print(ads_get_single_ended(true,chan));
-          c.println(F(" counts"));
-        } else if ((chan >= 4) & (chan <= 7)) {
-          c.print(F("AIN"));
-          c.print(chan);
-          c.print(F("= "));
-          c.print(ads_get_single_ended(false,chan-4));
-          c.println(F(" counts"));
-        } else {
-          ERR_MSG
-        }
-      } else {
-        ERR_MSG
-      }
-    } else if (cmd.equals("?") | cmd.equals("help")){ //help request command
-	  c.println(F("__Supported Commands__"));
-      for(int i=0; i<nCommands;i++){
-        c.print(PGM2STR(help, 2*i));
-        c.print(F(": "));
-        c.println(PGM2STR(help, 2*i+1));
-      }
-    } else if (cmd.equals(F("exit")) | cmd.equals(F("close")) | cmd.equals(F("disconnect")) | cmd.equals(F("quit")) | cmd.equals(F("logout"))){ //logout
-      c.println(F("Goodbye"));
-      c.stop();
-    } else { //bad command
+// does an action based on command string from client
+void command_handler(EthernetClient c, String cmd){
+  if (cmd.equals("")){ //ignore empty command
+    NOP;
+  } else if (cmd.equals("v")){ //version request command
+    report_firmware_version(c);
+  } else if (cmd.equals("a")){ //analog voltage supply span command
+    c.print(F("Analog voltage span as read by U2 (current adc): "));
+    c.print(ads_check_supply(true),6);
+    c.println(F("V"));
+    c.print(F("Analog voltage span as read by U5 (voltage adc): "));
+    c.print(ads_check_supply(false),6);
+    c.println(F("V"));
+  } else if (cmd.equals("s")){ //pixel deselect command
+    mcp23x17_all_off();
+  } else if (cmd.startsWith("s") & (cmd.length() == 3)){ //pixel select command
+    pixSetErr = set_pix(cmd.substring(1));
+    if (pixSetErr !=0){
+      c.print(F("ERROR: Pixel selection error code "));
+      c.println(pixSetErr);
+    }
+  } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
+    uint8_t pd = cmd.charAt(1) - '0';
+    if (pd == 1 | pd == 2){
+        c.print(F("Photodiode D"));
+        c.print(pd);
+        c.print(F(" = "));
+        c.print(ads_get_single_ended(true,pd+1));
+        c.println(F(" counts"));
+    } else {
       ERR_MSG
     }
-    
-    c.print(F(">>> ")); //send prompt
-  }
-  
-  if (c && !c.connected()){
+  } else if (cmd.startsWith("c") & (cmd.length() == 2)){ //mux check command
+    uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+    if ((substrate >= 0) & (substrate <= 7)){
+      bool result = mcp23x17_MUXCheck(substrate);
+      if (result){
+        c.println(F("MUX OK"));
+      } else {
+        c.println(F("MUX not found"));
+      }
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.startsWith("d") & (cmd.length() == 2)){ //pogo pin board sense divider measure command
+    uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+    if ((substrate >= 0) & (substrate <= 7)){
+      mcp_dev_addr = substrate;
+
+      mcp_reg_value = mcp23x17_read(mcp_dev_addr, MCP_OLATA_ADDR); // read OLATA
+      mcp_reg_value |= (1 << 2); // flip on V_D_EN bit
+      mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+      
+      c.print(F("Board "));
+      cmd.toUpperCase();
+      c.print(cmd.charAt(1));
+      cmd.toLowerCase();
+      c.print(F(" sense resistor = ")); 
+      c.print(ads_get_resistor(),0);
+      mcp_reg_value &= ~ (1 << 2); // flip off V_D_EN bit
+      mcp23x17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+      c.println(F(" Ohm"));
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.startsWith("adc")){ // adc read command
+    if (cmd.length() == 3){ //list all of the channels' counts
+      for(int i=0; i<=7; i++){
+        if ((i >= 0) & (i <= 3)){
+          c.print(F("AIN"));
+          c.print(i);
+          c.print(F(" (U2, current adc, channel "));
+          c.print(i);
+          c.print(F(") = "));
+          c.print(ads_get_single_ended(true,i));
+          c.println(F(" counts"));
+        }
+        if ((i >= 4) & (i <= 7)){
+          c.print(F("AIN"));
+          c.print(i);
+          c.print(F(" (U5, voltage adc, channel "));
+          c.print(i-4);
+          c.print(F(") = "));
+          c.print(ads_get_single_ended(false,i-4));
+          c.println(F(" counts"));
+        }
+      }
+    } else if (cmd.length() == 4){
+      int chan = cmd.charAt(3) - '0'; // 0-3 are mapped to U2's (current adc) chans AIN0-3, 4-7 are mapped to U5's (voltage adc) chans AIN0-3
+      if ((chan >= 0) & (chan <= 3)){  
+        c.print(F("AIN"));
+        c.print(chan);
+        c.print(F("= "));
+        c.print(ads_get_single_ended(true,chan));
+        c.println(F(" counts"));
+      } else if ((chan >= 4) & (chan <= 7)) {
+        c.print(F("AIN"));
+        c.print(chan);
+        c.print(F("= "));
+        c.print(ads_get_single_ended(false,chan-4));
+        c.println(F(" counts"));
+      } else {
+        ERR_MSG
+      }
+    } else {
+      ERR_MSG
+    }
+#ifndef ADS1015
+  } else if (cmd.startsWith(F("stream")) & (cmd.length() >= 7)){ //stream sample data from the ADC
+    cmd.remove(0,6); // remove the word stream
+    c.print(F("Streaming "));
+    c.print(cmd.toInt());
+    c.print(F(" ADC samples on a 505.859375 microsecond interval..."));
+    stream_ADC(c, cmd.toInt());
+    c.println(F("ADC streaming complete."));
+#endif //ADS1015
+  } else if (cmd.equals("?") | cmd.equals("help")){ //help request command
+    c.println(F("__Supported Commands__"));
+    for(int i=0; i<nCommands;i++){
+      c.print(PGM2STR(help, 2*i));
+      c.print(F(": "));
+      c.println(PGM2STR(help, 2*i+1));
+    }
+  } else if (cmd.equals(F("exit")) | cmd.equals(F("close")) | cmd.equals(F("disconnect")) | cmd.equals(F("quit")) | cmd.equals(F("logout"))){ //logout
     c.stop();
+  } else { //bad command
+    ERR_MSG
   }
 }
 
@@ -416,23 +578,48 @@ void do_every_half_hour(void){
   Ethernet.maintain(); // DHCP renewal
 }
 
+// sends a prompt to the client
+void send_prompt(EthernetClient c){
+  c.print(F(">>> "));
+}
+
+// prints firmware version string to the client
+void report_firmware_version(EthernetClient c){
+  c.print(F("Firmware Version: "));
+  c.println(FIRMWARE_VER);
+}
+
 // reads bytes from a client connection and puts them into buf until
-// either the stop byte has been read or maximum-1 bytes have been read
-// always delivers with a null termination
-void get_cmd(char* buf, EthernetClient c, byte stop, int maximum){
-  byte a = 0x00;
+// either the terminator byte has been read or maximum-1 bytes have been read
+// always delivers with a null termination and cmd_terminator will be stripped
+// buf must be ready to be filled with at most maximum bytes
+void get_cmd(char* buf, EthernetClient c, int maximum){
+  buf[maximum] = 0x00; // guarentee that we null terminate even when we see no cmd_terminator
+  byte this_byte = 0x00;
+  byte last_byte = 0x00;
   int i = 0;
+  int bytes_read = 0;
+
   while ( i < (maximum-1) ){
-	while(c.available() == 0){}
-	a = c.read();
-	if (a == stop){
-	  break;
-    } else {
-	  buf[i] = a;
-    }
-    i++;
-  }
-  buf[i] = 0x00; // null terminate
+    //while(c.available() == 0){NOP;} // wait until there's a byte to read
+    bytes_read = c.readBytes(&this_byte, 1);
+    //this_byte = (byte) c.read();
+    // now we check if we got the terminator
+    if (bytes_read == 0){ // read error (timeout or something)
+      buf[i] = 0x00;
+      break;
+    } else if ((sizeof cmd_terminator == 2) && (this_byte == cmd_terminator[1]) && (last_byte == cmd_terminator[0])) { // length 2 terminator found
+      buf[i-1] = 0x00;
+      break;
+    } else if ((sizeof cmd_terminator == 1) && (this_byte == cmd_terminator[0])) {  // length 1 terminator found
+      buf[i] = 0x00;
+      break;
+    } else { // normal command character read
+      buf[i] = this_byte;
+      last_byte = this_byte;
+      i++;
+    } // end decision on what to do with byte read
+  } // end readling loop
 }
 
 uint8_t mcp23x17_read(uint8_t dev_address, uint8_t reg_address){
@@ -653,6 +840,21 @@ uint8_t ads_start_sync(bool current_adc){
   return(Wire.endTransmission());
 }
 
+//send the POWERDOWN command
+uint8_t ads_powerdown(bool current_adc){
+  uint8_t address;
+  if (current_adc) {
+    address = CURRENT_ADS122C04_ADDRESS;
+    
+  } else {
+    address = VOLTAGE_ADS122C04_ADDRESS;
+  }
+  Wire.beginTransmission(address);
+  Wire.write(ADS122C04_POWERDOWN_CODE);
+  return(Wire.endTransmission());
+  // consider putting 60ms delay here
+}
+
 //get latest adc counts
 int32_t ads_get_data(bool current_adc){
   int32_t data = 0;
@@ -660,7 +862,7 @@ int32_t ads_get_data(bool current_adc){
   uint8_t address;
   uint8_t transmission_status;
   
-  if (current_adc) {
+  if (current_adc == true) {
     address = CURRENT_ADS122C04_ADDRESS;
     
   } else {
@@ -670,7 +872,7 @@ int32_t ads_get_data(bool current_adc){
   Wire.beginTransmission(address);
   Wire.write(ADS122C04_RDATA_CODE);
   if (Wire.endTransmission(false) == 0){
-    Wire.requestFrom(address, (uint8_t)3);
+    Wire.requestFrom(address, (uint8_t) 3);
     data_storage =  Wire.read();
     data_storage =  data_storage << 8;
     data_storage |= Wire.read();
@@ -711,14 +913,77 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
   }
   Wire.beginTransmission(address);
   Wire.write(((reg & 0x03)<<2)|ADS122C04_RREG_CODE);
-  if (Wire.endTransmission(false) == 0){ // TODO: impossible to tell the difference between a NAK and 0x00 register value :-(
+  if (Wire.endTransmission(false) == 0){ // TODO: impossible to tell the difference between a NAK and 0x00 register value, sad times :-(
     Wire.requestFrom(address, (uint8_t)1);
     reg_value = Wire.read();
   }
 
   return(reg_value);
 }
-#endif
+
+void stream_ADC(EthernetClient c, uint32_t n_readings){
+  static const int msg_len = 6; // length of the ADC stream message
+  volatile uint8_t buf[msg_len] = {0x00}; // buffer for ADC comms
+  volatile uint8_t last_counter_value = 0x00;
+  volatile int bytes_to_read = 0;
+  volatile uint32_t adc_periods = 0;
+  volatile uint16_t adc_crc = 0;
+  volatile uint16_t adc_crc_running = 0x00;
+  
+  // setup ADS
+  ads_write(true, 0, B1011 << 4); // set MUX. B1011 is for one photodiode (AINp=Ain3, AINn=AVSS). B1010 would be for the other one
+  ads_write(true, 1, B11011000); // CM=1, MODE=1, DR=110 for 2k samples/sec continuously
+  ads_write(true, 2, B01100000); // DCNT=1, CRC=10, data counter byte enable and crc16 bytes enable
+  ads_start_sync(true);
+
+  Wire.setClock(400000);// need I2C fast mode here to keep up with the ADC sample rate
+  delayMicroseconds(52); // datasheet says the first conversion starts 105 clock cycles after START/SYNC (in turbo mode when t_clk=1/2.048 MHz)
+  while (adc_periods < n_readings){
+    
+    while (last_counter_value == buf[0]){ // poll for new sample
+      Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
+      if (Wire.write(ADS122C04_RDATA_CODE) == 1){
+        if (Wire.endTransmission(false) == 0){
+          bytes_to_read = Wire.requestFrom(CURRENT_ADS122C04_ADDRESS, msg_len, true);  // ~13.3us
+          if(bytes_to_read == msg_len){
+            buf[0] = Wire.read();
+            adc_crc_running = _crc_xmodem_update(0xffff, buf[0]);
+            buf[1] = Wire.read();
+            adc_crc_running = _crc_xmodem_update(adc_crc_running, buf[1]);
+            buf[2] = Wire.read();
+            adc_crc_running = _crc_xmodem_update(adc_crc_running, buf[2]);
+            buf[3] = Wire.read();
+            adc_crc_running = _crc_xmodem_update(adc_crc_running, buf[3]);
+            // continuting to compute crc and checking for zero seems elegant, but it's a bit slower
+            //adc_crc_running = _crc_xmodem_update(adc_crc_running, Wire.read());
+            //adc_crc_running = _crc_xmodem_update(adc_crc_running, Wire.read());
+
+            // read the crc bytes and assign them in reverse
+            adc_crc = (Wire.read() << 8);
+            adc_crc |= Wire.read();
+  
+            // computing over all bytes and checking for zero CRC result is slower than this by a few 10s of us :-P
+            //if (adc_crc_running != 0){
+            if (adc_crc_running != adc_crc){ // ~17 us
+              buf[0] = last_counter_value; // crc check failure so force retransmission no matter what
+            } // end crc check
+          } // end message length check
+        } // end Wire.endTransmission check
+      } // end Wire.write check
+    } // end counter change check
+    adc_periods += (uint8_t)(buf[0] - last_counter_value); // keep track of how many time periods the ADC has seen
+    last_counter_value = buf[0]; // remember what the last sample counter value was
+    digitalWrite(LED2_pin, HIGH);
+    c.write((uint8_t*)buf, 4) ; //~268us
+    digitalWrite(LED2_pin, LOW);
+  } // end number of sample periods check
+  Wire.setClock(100000);// go back to I2C standard mode
+  // clean up ADS
+  ads_powerdown(true); // power down the current adc and stop any ongoing conversion
+  delay(60); //worst possible case powerdown dealy (10ms longer than slowest possible conversion time)
+  ads_reset(true); // reset the current adc
+}
+#endif // NOT ADS1015
 
 uint8_t setup_MCP(void){
   // pulse CS to clear out weirdness from startup

@@ -7,4 +7,5 @@
 
 cd mainArduino
 arduino-cli compile -v -o build/firmware -b arduino:avr:mega .
+#arduino-cli compile --show-properties -v -o build/firmware -b arduino:avr:mega .
 rm -rf /tmp/arduino-*
