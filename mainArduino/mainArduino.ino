@@ -4,7 +4,7 @@
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
-#define BIT_BANG_SPI
+//#define BIT_BANG_SPI
  
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
 //#define DEBUG
