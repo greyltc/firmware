@@ -13,5 +13,5 @@
 # user must have write permissions for the arduino port (probably enough to be in the uucp group)
 
 cd mainArduino/build
-#avrdude -v -C/etc/avrdude.conf -patmega2560 -cwiring -P"$1" -b115200 -D -Uflash:w:mutovis_firmware.hex:i
-arduino-cli upload -b arduino:avr:mega -i mutovis_firmware.hex -p "$1" -v -t
+#avrdude -v -C/etc/avrdude.conf -patmega2560 -cwiring -P"$1" -b115200 -D -Uflash:w:firmware.hex:i
+arduino-cli upload -b arduino:avr:mega -i firmware.hex -p "$1" -v -t

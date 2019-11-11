@@ -1,5 +1,5 @@
 # firmware
-Firmware design files for controlling the hardware from https://github.com/mutovis/hardware
+Firmware design files for controlling the hardware from https://github.com/greyltc/hardware
 
 ## Compiling
 Via [arduino-cli](https://github.com/arduino/arduino-cli):
@@ -11,8 +11,8 @@ arduino-cli lib install "Ethernet"
 arduino-cli lib install "SD"
 
 cd mainArduino
-arduino-cli compile -v -o build/mutovis_firmware -b arduino:avr:mega .
-# now you have the firmware in build/mutovis_firmware.hex
+arduino-cli compile -v -o build/firmware -b arduino:avr:mega .
+# now you have the firmware in build/firmware.hex
 ```
 
 ## Flashing
@@ -22,5 +22,5 @@ Via [avrdude](http://www.nongnu.org/avrdude/):
 arduino-cli board list
 # then flash the firmware you compiled above (after editing in the correct value for -P you just discovered)
 cd mainArduino
-avrdude -v -C/etc/avrdude.conf -patmega2560 -cwiring -P/dev/ttyACMX -b115200 -D -Uflash:w:build/mutovis_firmware.hex:i
+avrdude -v -C/etc/avrdude.conf -patmega2560 -cwiring -P/dev/ttyACMX -b115200 -D -Uflash:w:build/firmware.hex:i
 ```
