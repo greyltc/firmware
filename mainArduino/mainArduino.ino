@@ -1,6 +1,6 @@
 // ====== start user editable config ======
 
-#define FIRMWARE_VER "daa3f10"
+#define FIRMWARE_VER "0ad22c4"
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
