@@ -1,5 +1,5 @@
 # firmware
-Firmware design files for controlling the hardware from https://github.com/greyltc/hardware
+Firmware design files for controlling the hardware from https://github.com/greyltc/electronics and/or https://github.com/greyltc/hardware
 
 ## Compiling
 Via [arduino-cli](https://github.com/arduino/arduino-cli):
