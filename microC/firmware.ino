@@ -634,13 +634,33 @@ void report_firmware_version(EthernetClient c){
 // sends home command to an axis
 void send_home(EthernetClient c){
   int axis = 0;
+  char result = 'f';
+  int addr;
+  int bytes_to_read;
   if (axis == 0){
-    Wire.beginTransmission(AXIS0_ADDR);
+    addr = AXIS0_ADDR;
   }
-  Wire.write(byte('h'));            // sends instruction byte  
-  Wire.endTransmission();     // stop transmitting
-  c.print(F("Home request sent to axis "));
-  c.println(axis);
+
+  // Wire.beginTransmission(addr);
+  // if (Wire.write('h') == 1){  // sends instruction byte
+  //   if (Wire.endTransmission(false) == 0){
+  //     bytes_to_read = Wire.requestFrom(addr, 1, true);
+  //     if(bytes_to_read == 1){
+  //       result =  Wire.read();
+  //     }
+  //   }
+  // }
+
+  Wire.beginTransmission(addr);
+  Wire.write('h');
+  Wire.endTransmission(true);
+  Wire.requestFrom(addr, 1);
+  result = Wire.read();
+
+  if (result != 'p') {
+      c.print(F("ERROR"));
+      c.print(int(result));
+  }
 }
 
 // reads bytes from a client connection and puts them into buf until
@@ -1028,9 +1048,9 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
     } // end counter change check
     adc_periods += (uint8_t)(buf[0] - last_counter_value); // keep track of how many time periods the ADC has seen
     last_counter_value = buf[0]; // remember what the last sample counter value was
-    digitalWrite(LED2_pin, HIGH);
+    digitalWrite(LED2_PIN, HIGH);
     c.write((uint8_t*)buf, 4) ; //~268us
-    digitalWrite(LED2_pin, LOW);
+    digitalWrite(LED2_PIN, LOW);
   } // end number of sample periods check
   Wire.setClock(100000);// go back to I2C standard mode
   // clean up ADS
