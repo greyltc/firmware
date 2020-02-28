@@ -21,6 +21,12 @@
 // when ADS1015 is defined, the build will be for the old board with ADS1015, otherwise it'll be for ADS122C04
 //#define ADS1015
 
+// disable the ADC altogether
+//#define NO_ADC
+
+// disable comms to the stage
+//#define NO_STAGE
+
 // ====== end user editable config ======
 
 // FYI-- do something like this to enter the control interface:
@@ -44,22 +50,29 @@
 #ifdef USE_SD
 #include <SD.h>
 #endif //USE_SD
+
+#ifndef NO_ADC
 #ifdef ADS1015
 #include <Adafruit_ADS1015.h>
-#endif//ADS1015
+#endif //ADS1015
+#endif //NO_ADC
 
 // help for commands
 const char help_v_a[] PROGMEM = "v";
 const char help_v_b[] PROGMEM = "display firmware revision";
-
-const char help_adc_a[] PROGMEM = "adc";
-const char help_adc_b[] PROGMEM = "\"adcX\" returns count of channel X (can be [0,7]), just \"adc\" returns counts of all channels";
 
 const char help_s_a[] PROGMEM = "s";
 const char help_s_b[] PROGMEM = "\"sXY\", selects pixel Y on substrate X, just \"s\" disconnects all pixels";
 
 const char help_c_a[] PROGMEM = "c";
 const char help_c_b[] PROGMEM = "\"cX\", checks that MUX X is connected";
+
+const char help_h_a[] PROGMEM = "h";
+const char help_h_b[] PROGMEM = "\"hX\", homes axis X";
+
+#ifndef NO_ADC
+const char help_adc_a[] PROGMEM = "adc";
+const char help_adc_b[] PROGMEM = "\"adcX\" returns count of channel X (can be [0,7]), just \"adc\" returns counts of all channels";
 
 const char help_d_a[] PROGMEM = "d";
 const char help_d_b[] PROGMEM = "\"dX\" selects board X's type indicator resistor and returns associated adc counts";
@@ -74,6 +87,7 @@ const char help_a_b[] PROGMEM = "\"a\" returns the analog voltage supply span as
 const char help_stream_a[] PROGMEM = "stream";
 const char help_stream_b[] PROGMEM = "\"stream\" streams ADC data";
 #endif //ADS1015
+#endif //NO_ADC
 
 const char help_exit_a[] PROGMEM = "disconnect or close or logout or exit or quit";
 const char help_exit_b[] PROGMEM = "ends session";
@@ -83,15 +97,18 @@ const char help_help_b[] PROGMEM = "print this help";
 
 const char* const help[] PROGMEM  = {
   help_v_a, help_v_b,
-  help_adc_a, help_adc_b,
   help_s_a, help_s_b,
   help_c_a, help_c_b,
+  help_h_a, help_h_b,
+#ifndef NO_ADC
+  help_adc_a, help_adc_b,
   help_d_a, help_d_b,
   help_p_a, help_p_b,
   help_a_a, help_a_b,
 #ifndef ADS1015
   help_stream_a, help_stream_b,
 #endif //ADS1015
+#endif //NO_ADC
   help_exit_a, help_exit_b,
   help_help_a, help_help_b
 };
@@ -112,6 +129,7 @@ volatile char err_byte[3]; // for holding a null terminated hex string for one s
 #define STREAM_FILE "adcbytes.bin"
 #endif //USE_SD
 
+#ifndef NO_ADC
 #ifdef ADS1015
 Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #else
@@ -128,6 +146,7 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, ~20 samples/sec. has 0.99ms headroom. actual time is 51192 normal mode clock cycles (1.024 MHz)
 #define ADS122C04_CONVERSION_TIME_TURBO 506 // in microseconds, for the fastest possible continuous sample rate: turbo mode, ~2k samples/sec. actual time is 1036 turbo mode clock cycles (2.048 MHz). has 0.140625 microseconds headroom
 #endif
+#endif //NO_ADC
 
 //some definitions for the MCP23S17
 #define MCP_IODIRA_ADDR 0x00
@@ -140,6 +159,9 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #define MCP_SPI_CTRL_BYTE_HEADER 0x40
 #define MCP_SPI_READ 0x01
 #define MCP_SPI_WRITE 0x00
+
+// stage controller I2C addresses
+#define AXIS0_ADDR 0x04
 
 // error definitions
 #define NO_ERROR 0
@@ -169,8 +191,8 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
 const unsigned int HARDWARE_SPI_CS = 53; // arduino pin that goes (in hardware) with the SPI bus (must be set output)
 #ifndef NO_LED
-const unsigned int LED_pin = 13; // arduino pin for alive LED
-const unsigned int LED2_pin = 12; // arduino pin for LED2
+const unsigned int LED_PIN = 13; // arduino pin for alive LED
+const unsigned int LED2_PIN = 12; // arduino pin for LED2
 #endif
 
 const unsigned int ETHERNET_SPI_CS = 10; // arduino pin that's connected to the ethernet shield's W5500 CS line
@@ -259,11 +281,10 @@ void setup() {
   
   #ifdef DEBUG
   Serial.println(F("Done!"));
-  Serial.print(F("Listening for TCP connections on "));
+  Serial.print(F("Ready for TCP (telnet) connections on "));
   Serial.print(Ethernet.localIP());
   Serial.print(F(":"));
-  Serial.print(serverPort);
-  Serial.println(F(" ..."));
+  Serial.println(serverPort);
   #endif // DEBUG
 
   // ============= SD card setup ==============
@@ -273,7 +294,7 @@ void setup() {
   #endif // DEBUG
 
   if (!SD.begin(SD_SPI_CS)) {
-	  #ifdef DEBUG
+    #ifdef DEBUG
     Serial.println(F("SD initialization failed!"));
     #endif // DEBUG
     while (1); // chill here forever if SD card init failed
@@ -327,12 +348,17 @@ void setup() {
   #endif // USE_SD
   
   #ifndef NO_LED
-  pinMode(LED_pin, OUTPUT); // to show we are working
-  pinMode(LED2_pin, OUTPUT);
+  pinMode(LED_PIN, OUTPUT); // to show we are working
+  pinMode(LED2_PIN, OUTPUT);
   #endif
 
+  #ifndef NO_ADC
   // ============= ADC setup ============== 
   delayMicroseconds(500); // wait to ensure the adc has finished powering up
+  #ifdef DEBUG
+  Serial.print(F("ADC init..."));
+  #endif // DEBUG
+
   #ifdef ADS1015
   ads.begin();
   #else
@@ -340,10 +366,20 @@ void setup() {
   ads_reset(false); // reset the voltage adc
   #endif
 
+  #ifdef DEBUG
+  Serial.println(F("done."));
+  #endif // DEBUG
+  #endif //NO_ADC
+
+  #ifdef DEBUG
+  Serial.print(F("Probing for port expanders..."));
+  #endif // DEBUG
+  
   // setup the port expanders
   connected_devices = setup_MCP();
   
   #ifdef DEBUG
+  Serial.println(F("done."));
   Serial.println(F("________End Setup Function________"));
   #endif
 }
@@ -375,13 +411,11 @@ void loop() {
 	   half_hour_action_done = false;
   }
   
-  #ifndef NO_LED
-  //blink the alive pin
-  digitalWrite(LED_pin, HIGH);
+#ifndef NO_LED
+  //toggle the alive pin
+  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+#endif
   delay(aliveCycleT);
-  digitalWrite(LED_pin, LOW);
-  delay(aliveCycleT);
-  #endif
 
   // wait for a new client:
   EthernetClient new_client = server.accept();
@@ -446,6 +480,9 @@ void command_handler(EthernetClient c, String cmd){
     NOP;
   } else if (cmd.equals("v")){ //version request command
     report_firmware_version(c);
+  } else if (cmd.equals("h")){ //home request command
+    send_home(c);
+#ifndef NO_ADC
   } else if (cmd.equals("a")){ //analog voltage supply span command
     c.print(F("Analog voltage span as read by U2 (current adc): "));
     c.print(ads_check_supply(true),6);
@@ -453,6 +490,7 @@ void command_handler(EthernetClient c, String cmd){
     c.print(F("Analog voltage span as read by U5 (voltage adc): "));
     c.print(ads_check_supply(false),6);
     c.println(F("V"));
+#endif //NO_ADC
   } else if (cmd.equals("s")){ //pixel deselect command
     mcp23x17_all_off();
   } else if (cmd.startsWith("s") & (cmd.length() == 3)){ //pixel select command
@@ -461,6 +499,7 @@ void command_handler(EthernetClient c, String cmd){
       c.print(F("ERROR: Pixel selection error code "));
       c.println(pixSetErr);
     }
+#ifndef NO_ADC
   } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
     uint8_t pd = cmd.charAt(1) - '0';
     if (pd == 1 | pd == 2){
@@ -472,6 +511,7 @@ void command_handler(EthernetClient c, String cmd){
     } else {
       ERR_MSG
     }
+#endif // NO_ADC
   } else if (cmd.startsWith("c") & (cmd.length() == 2)){ //mux check command
     uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
     if ((substrate >= 0) & (substrate <= 7)){
@@ -484,6 +524,7 @@ void command_handler(EthernetClient c, String cmd){
     } else {
       ERR_MSG
     }
+#ifndef NO_ADC
   } else if (cmd.startsWith("d") & (cmd.length() == 2)){ //pogo pin board sense divider measure command
     uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
     if ((substrate >= 0) & (substrate <= 7)){
@@ -556,6 +597,7 @@ void command_handler(EthernetClient c, String cmd){
     stream_ADC(c, cmd.toInt());
     c.println(F("ADC streaming complete."));
 #endif //ADS1015
+#endif //NO_ADC
   } else if (cmd.equals("?") | cmd.equals("help")){ //help request command
     c.println(F("__Supported Commands__"));
     for(int i=0; i<nCommands;i++){
@@ -587,6 +629,18 @@ void send_prompt(EthernetClient c){
 void report_firmware_version(EthernetClient c){
   c.print(F("Firmware Version: "));
   c.println(FIRMWARE_VER);
+}
+
+// sends home command to an axis
+void send_home(EthernetClient c){
+  int axis = 0;
+  if (axis == 0){
+    Wire.beginTransmission(AXIS0_ADDR);
+  }
+  Wire.write(byte('h'));            // sends instruction byte  
+  Wire.endTransmission();     // stop transmitting
+  c.print(F("Home request sent to axis "));
+  c.println(axis);
 }
 
 // reads bytes from a client connection and puts them into buf until
@@ -742,6 +796,7 @@ int set_pix(String pix){
   return (error);
 }
 
+#ifndef NO_ADC
 // check analog voltage range
 float ads_check_supply(bool current_adc){
   float data = 0;
@@ -984,6 +1039,7 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
   ads_reset(true); // reset the current adc
 }
 #endif // NOT ADS1015
+#endif //NO_ADC
 
 uint8_t setup_MCP(void){
   // pulse CS to clear out weirdness from startup
