@@ -1,6 +1,6 @@
 // ====== start user editable config ======
 
-#define FIRMWARE_VER "0ad22c4"
+#define FIRMWARE_VER "1.0.0+0ad22c4"
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
@@ -68,7 +68,16 @@ const char help_c_a[] PROGMEM = "c";
 const char help_c_b[] PROGMEM = "\"cX\", checks that MUX X is connected";
 
 const char help_h_a[] PROGMEM = "h";
-const char help_h_b[] PROGMEM = "\"hX\", homes axis X";
+const char help_h_b[] PROGMEM = "\"hX\", homes axis X, just \"h\" homes all axes";
+
+const char help_l_a[] PROGMEM = "l";
+const char help_l_b[] PROGMEM = "\"lX\", returns the length in steps of axis X (0 means un-homed)";
+
+const char help_g_a[] PROGMEM = "g";
+const char help_g_b[] PROGMEM = "\"gX[position]\", sends axis X to posion (given in integer steps)";
+
+const char help_r_a[] PROGMEM = "r";
+const char help_r_b[] PROGMEM = "\"rX\", reads out the position of axis X (in steps)";
 
 #ifndef NO_ADC
 const char help_adc_a[] PROGMEM = "adc";
@@ -100,6 +109,9 @@ const char* const help[] PROGMEM  = {
   help_s_a, help_s_b,
   help_c_a, help_c_b,
   help_h_a, help_h_b,
+  help_l_a, help_l_b,
+  help_g_a, help_g_b,
+  help_r_a, help_r_b,
 #ifndef NO_ADC
   help_adc_a, help_adc_b,
   help_d_a, help_d_b,
@@ -425,7 +437,7 @@ void loop() {
       if (!clients[i]) {
         new_client.print(F("You are Client Number "));
         new_client.print(i);
-        new_client.print(F(". I am "));
+        new_client.print(F(". I am Firmware Version: "));
         report_firmware_version(new_client);
 
         delay(10);  // connection garbage collection time
@@ -454,7 +466,7 @@ void loop() {
       cmd = String((char*)cmd_buf);
       //cmd = c.readStringUntil(CMD_TERMINATOR);
       cmd.toLowerCase(); //case insensative
-      clients[j].println(F(""));
+      //clients[j].println(F(""));
 
       // handle command
       command_handler(clients[j], cmd);
@@ -480,8 +492,12 @@ void command_handler(EthernetClient c, String cmd){
     NOP;
   } else if (cmd.equals("v")){ //version request command
     report_firmware_version(c);
-  } else if (cmd.equals("h")){ //home request command
+  } else if (cmd.startsWith("h")){ //home request command
     send_home(c);
+  } else if (cmd.startsWith("l")){ //get stage length command
+    get_len(c);
+  } else if (cmd.startsWith("r")){ //read back stage position
+    get_pos(c);
 #ifndef NO_ADC
   } else if (cmd.equals("a")){ //analog voltage supply span command
     c.print(F("Analog voltage span as read by U2 (current adc): "));
@@ -627,7 +643,6 @@ void send_prompt(EthernetClient c){
 
 // prints firmware version string to the client
 void report_firmware_version(EthernetClient c){
-  c.print(F("Firmware Version: "));
   c.println(FIRMWARE_VER);
 }
 
@@ -641,25 +656,91 @@ void send_home(EthernetClient c){
     addr = AXIS0_ADDR;
   }
 
-  // Wire.beginTransmission(addr);
-  // if (Wire.write('h') == 1){  // sends instruction byte
-  //   if (Wire.endTransmission(false) == 0){
-  //     bytes_to_read = Wire.requestFrom(addr, 1, true);
-  //     if(bytes_to_read == 1){
-  //       result =  Wire.read();
-  //     }
-  //   }
-  // }
-
-  Wire.beginTransmission(addr);
-  Wire.write('h');
-  Wire.endTransmission(true);
-  Wire.requestFrom(addr, 1);
-  result = Wire.read();
+   Wire.beginTransmission(addr);
+   if (Wire.write('h') == 1){  // sends instruction byte
+     if (Wire.endTransmission(false) == 0){
+       bytes_to_read = Wire.requestFrom(addr, 1, true);
+       if(bytes_to_read == 1){
+         result =  Wire.read();
+       }
+     }
+   }
 
   if (result != 'p') {
-      c.print(F("ERROR"));
-      c.print(int(result));
+      c.print(F("ERROR "));
+      c.println(int(result));
+  }
+}
+
+// gets the length of an axis
+void get_len(EthernetClient c){
+  int axis = 0;
+  char result = 'f';
+  int addr;
+  int bytes_to_read;
+  int32_t length = 0;
+  if (axis == 0){
+    addr = AXIS0_ADDR;
+  }
+
+   Wire.beginTransmission(addr);
+   if (Wire.write('l') == 1){  // sends instruction byte
+     if (Wire.endTransmission(false) == 0){
+       bytes_to_read = Wire.requestFrom(addr, 5, true);
+       if(bytes_to_read == 5){
+         result =  Wire.read();
+         length =  Wire.read();
+         length =  length << 8;
+         length |=  Wire.read();
+         length =  length << 8;
+         length |=  Wire.read();
+         length =  length << 8;
+         length |=  Wire.read();
+       }
+     }
+   }
+
+  if (result != 'p') {
+      c.print(F("ERROR "));
+      c.println(int(result));
+  } else {
+    c.println(length);
+  }
+}
+
+// reads back the stage position
+void get_pos(EthernetClient c){
+  int axis = 0;
+  char result = 'f';
+  int addr;
+  int bytes_to_read;
+  int32_t pos = 0;
+  if (axis == 0){
+    addr = AXIS0_ADDR;
+  }
+
+   Wire.beginTransmission(addr);
+   if (Wire.write('r') == 1){  // sends instruction byte
+     if (Wire.endTransmission(false) == 0){
+       bytes_to_read = Wire.requestFrom(addr, 5, true);
+       if(bytes_to_read == 5){
+         result =  Wire.read();
+         pos =  Wire.read();
+         pos =  pos << 8;
+         pos |=  Wire.read();
+         pos =  pos << 8;
+         pos |=  Wire.read();
+         pos =  pos << 8;
+         pos |=  Wire.read();
+       }
+     }
+   }
+
+  if (result != 'p') {
+      c.print(F("ERROR "));
+      c.println(int(result));
+  } else {
+    c.println(pos);
   }
 }
 
