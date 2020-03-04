@@ -1,6 +1,8 @@
+#define VERSION_MAJOR 0
+#define VERSION_MINOR 1
+#define VERSION_PATCH 0
+#define BUILD 0ad22c4
 // ====== start user editable config ======
-
-#define FIRMWARE_VER "1.0.0+0ad22c4"
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
@@ -141,6 +143,11 @@ volatile char err_byte[3]; // for holding a null terminated hex string for one s
 #define STREAM_FILE "adcbytes.bin"
 #endif //USE_SD
 
+// create version string
+#define STRINGIFY0(s) # s
+#define STRINGIFY(s) STRINGIFY0(s)
+#define FIRMWARE_VER STRINGIFY(VERSION_MAJOR)"."STRINGIFY(VERSION_MINOR)"."STRINGIFY(VERSION_PATCH)"+"STRINGIFY(BUILD)
+
 #ifndef NO_ADC
 #ifdef ADS1015
 Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
@@ -173,7 +180,13 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #define MCP_SPI_WRITE 0x00
 
 // stage controller I2C addresses
-#define AXIS0_ADDR 0x04
+const char AXIS_ADDR[3] = {0x04, 0x05, 0x06};
+
+// a "long buffer" union datatype
+union Lb{
+  int32_t the_number;
+  byte the_bytes[4]; // byte representation of the number
+};
 
 // error definitions
 #define NO_ERROR 0
@@ -492,12 +505,34 @@ void command_handler(EthernetClient c, String cmd){
     NOP;
   } else if (cmd.equals("v")){ //version request command
     report_firmware_version(c);
-  } else if (cmd.startsWith("h")){ //home request command
-    send_home(c);
-  } else if (cmd.startsWith("l")){ //get stage length command
-    get_len(c);
-  } else if (cmd.startsWith("r")){ //read back stage position
-    get_pos(c);
+  } else if (cmd.startsWith("h") & (cmd.length() == 2)){ //home request command
+    int ax = cmd.charAt(1) - '0';
+    if ((ax >= 0) & (ax <= 2)){
+        send_home(c, ax);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.startsWith("l") & (cmd.length() == 2)){ //stage length request
+    int ax = cmd.charAt(1) - '0';
+    if ((ax >= 0) & (ax <= 2)){
+        get_len(c, ax);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.startsWith("r") & (cmd.length() == 2)){ //read back stage pos
+    int ax = cmd.charAt(1) - '0';
+    if ((ax >= 0) & (ax <= 2)){
+        get_pos(c, ax);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.startsWith("g") & (cmd.length() > 2)){ //send the stage somewhere
+    int ax = cmd.charAt(1) - '0';
+    if ((ax >= 0) & (ax <= 2)){
+        go_to(c, ax, cmd.substring(2).toInt());
+    } else {
+      ERR_MSG
+    }
 #ifndef NO_ADC
   } else if (cmd.equals("a")){ //analog voltage supply span command
     c.print(F("Analog voltage span as read by U2 (current adc): "));
@@ -519,11 +554,7 @@ void command_handler(EthernetClient c, String cmd){
   } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
     uint8_t pd = cmd.charAt(1) - '0';
     if (pd == 1 | pd == 2){
-        c.print(F("Photodiode D"));
-        c.print(pd);
-        c.print(F(" = "));
-        c.print(ads_get_single_ended(true,pd+1));
-        c.println(F(" counts"));
+        c.println(ads_get_single_ended(true,pd+1));
     } else {
       ERR_MSG
     }
@@ -532,9 +563,7 @@ void command_handler(EthernetClient c, String cmd){
     uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
     if ((substrate >= 0) & (substrate <= 7)){
       bool result = mcp23x17_MUXCheck(substrate);
-      if (result){
-        c.println(F("MUX OK"));
-      } else {
+      if (!result){
         c.println(F("MUX not found"));
       }
     } else {
@@ -647,24 +676,23 @@ void report_firmware_version(EthernetClient c){
 }
 
 // sends home command to an axis
-void send_home(EthernetClient c){
-  int axis = 0;
+void send_home(EthernetClient c, int axis){
   char result = 'f';
   int addr;
   int bytes_to_read;
-  if (axis == 0){
-    addr = AXIS0_ADDR;
-  }
 
-   Wire.beginTransmission(addr);
-   if (Wire.write('h') == 1){  // sends instruction byte
-     if (Wire.endTransmission(false) == 0){
-       bytes_to_read = Wire.requestFrom(addr, 1, true);
-       if(bytes_to_read == 1){
-         result =  Wire.read();
-       }
-     }
-   }
+  if (axis >= 0 && axis <= 2){
+    addr = AXIS_ADDR[axis];
+    Wire.beginTransmission(addr);
+    if (Wire.write('h') == 1){  // sends instruction byte
+      if (Wire.endTransmission(false) == 0){
+        bytes_to_read = Wire.requestFrom(addr, 1, true);
+        if(bytes_to_read == 1){
+          result =  Wire.read();
+        }
+      }
+    }
+  }
 
   if (result != 'p') {
       c.print(F("ERROR "));
@@ -673,32 +701,30 @@ void send_home(EthernetClient c){
 }
 
 // gets the length of an axis
-void get_len(EthernetClient c){
-  int axis = 0;
+void get_len(EthernetClient c, int axis){
   char result = 'f';
   int addr;
   int bytes_to_read;
   int32_t length = 0;
-  if (axis == 0){
-    addr = AXIS0_ADDR;
+  if (axis >= 0 && axis <= 2){
+    addr = AXIS_ADDR[axis];
+    Wire.beginTransmission(addr);
+    if (Wire.write('l') == 1){  // sends instruction byte
+      if (Wire.endTransmission(false) == 0){
+        bytes_to_read = Wire.requestFrom(addr, 5, true);
+        if(bytes_to_read == 5){
+          result =  Wire.read();
+          length =  Wire.read();
+          length =  length << 8;
+          length |=  Wire.read();
+          length =  length << 8;
+          length |=  Wire.read();
+          length =  length << 8;
+          length |=  Wire.read();
+        }
+      }
+    }
   }
-
-   Wire.beginTransmission(addr);
-   if (Wire.write('l') == 1){  // sends instruction byte
-     if (Wire.endTransmission(false) == 0){
-       bytes_to_read = Wire.requestFrom(addr, 5, true);
-       if(bytes_to_read == 5){
-         result =  Wire.read();
-         length =  Wire.read();
-         length =  length << 8;
-         length |=  Wire.read();
-         length =  length << 8;
-         length |=  Wire.read();
-         length =  length << 8;
-         length |=  Wire.read();
-       }
-     }
-   }
 
   if (result != 'p') {
       c.print(F("ERROR "));
@@ -709,38 +735,63 @@ void get_len(EthernetClient c){
 }
 
 // reads back the stage position
-void get_pos(EthernetClient c){
-  int axis = 0;
+void get_pos(EthernetClient c, int axis){
   char result = 'f';
   int addr;
   int bytes_to_read;
   int32_t pos = 0;
-  if (axis == 0){
-    addr = AXIS0_ADDR;
+  if (axis >= 0 && axis <= 2){
+    addr = AXIS_ADDR[axis];
+    Wire.beginTransmission(addr);
+    if (Wire.write('r') == 1){  // sends instruction byte
+      if (Wire.endTransmission(false) == 0){
+        bytes_to_read = Wire.requestFrom(addr, 5, true);
+        if(bytes_to_read == 5){
+          result =  Wire.read();
+          pos =  Wire.read();
+          pos =  pos << 8;
+          pos |=  Wire.read();
+          pos =  pos << 8;
+          pos |=  Wire.read();
+          pos =  pos << 8;
+          pos |=  Wire.read();
+        }
+      }
+    }
   }
-
-   Wire.beginTransmission(addr);
-   if (Wire.write('r') == 1){  // sends instruction byte
-     if (Wire.endTransmission(false) == 0){
-       bytes_to_read = Wire.requestFrom(addr, 5, true);
-       if(bytes_to_read == 5){
-         result =  Wire.read();
-         pos =  Wire.read();
-         pos =  pos << 8;
-         pos |=  Wire.read();
-         pos =  pos << 8;
-         pos |=  Wire.read();
-         pos =  pos << 8;
-         pos |=  Wire.read();
-       }
-     }
-   }
 
   if (result != 'p') {
       c.print(F("ERROR "));
       c.println(int(result));
   } else {
     c.println(pos);
+  }
+}
+
+// sends the stage somewhere
+void go_to(EthernetClient c, int axis, int32_t position){
+  char result = 'f';
+  int addr;
+  int bytes_to_read;
+  Lb lb; //our int32_t buffer
+  lb.the_number = position; // copy in the requested position
+  if (axis >= 0 && axis <= 2){
+    addr = AXIS_ADDR[axis];
+    Wire.beginTransmission(addr);
+    if (Wire.write('g') == 1){  // sends instruction byte
+      Wire.write(lb.the_bytes,4); // sends the position bytes
+      if (Wire.endTransmission(false) == 0){
+        bytes_to_read = Wire.requestFrom(addr, 1, true);
+        if(bytes_to_read == 1){
+          result =  Wire.read();
+        }
+      }
+    }
+  }
+
+  if (result != 'p') {
+      c.print(F("ERROR "));
+      c.println(int(result));
   }
 }
 
