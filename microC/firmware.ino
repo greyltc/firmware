@@ -6,7 +6,7 @@
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
-//#define BIT_BANG_SPI
+#define BIT_BANG_SPI
  
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
 //#define DEBUG
@@ -21,7 +21,7 @@
 //#define STATIC_IP { 10, 42, 0, 54 }
 
 // when ADS1015 is defined, the build will be for the old board with ADS1015, otherwise it'll be for ADS122C04
-//#define ADS1015
+#define ADS1015
 
 // disable the ADC altogether
 //#define NO_ADC
