@@ -1,7 +1,7 @@
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 1
 #define VERSION_PATCH 1
-#define BUILD 004f99a
+#define BUILD 3f9a16f
 // ====== start user editable config ======
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
