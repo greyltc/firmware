@@ -1,12 +1,12 @@
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 1
-#define VERSION_PATCH 0
+#define VERSION_PATCH 1
 #define BUILD 004f99a
 // ====== start user editable config ======
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
-#define BIT_BANG_SPI
+//#define BIT_BANG_SPI
  
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
 //#define DEBUG
@@ -21,7 +21,7 @@
 //#define STATIC_IP { 10, 42, 0, 54 }
 
 // when ADS1015 is defined, the build will be for the old board with ADS1015, otherwise it'll be for ADS122C04
-#define ADS1015
+//#define ADS1015
 
 // disable the ADC altogether
 //#define NO_ADC
@@ -38,7 +38,7 @@
 #include <SPI.h>
 #endif//BIT_BANG_SPI
 //#include <FastCRC.h>
-#include <avr/crc16.h>  // for _crc_xmodem_update
+#include <util/crc16.h>  // for _crc_xmodem_update
 
 #include <Ethernet.h>
 // NOTE: the standard ethernet library uses a very conservative spi clock speed:
@@ -135,7 +135,7 @@ const char* const help[] PROGMEM  = {
 
 int nCommands = (sizeof(help)/sizeof(help[0]))/2;
 
-volatile char err_byte[3]; // for holding a null terminated hex string for one single command byte for error message printing
+char err_byte[3]; // for holding a null terminated hex string for one single command byte for error message printing
 #define ERR_MSG c.print(F("ERROR: Got bad a command byte array: 0x")); for (int i=0;i<cmd_buf_len;i++){ sprintf(err_byte, "%02x", (byte) cmd_buf[i]); c.print((char*) err_byte);} c.println(F("")); //sizeof cmd,
 
 #ifdef USE_SD
@@ -146,7 +146,7 @@ volatile char err_byte[3]; // for holding a null terminated hex string for one s
 // create version string
 #define STRINGIFY0(s) # s
 #define STRINGIFY(s) STRINGIFY0(s)
-#define FIRMWARE_VER STRINGIFY(VERSION_MAJOR)"."STRINGIFY(VERSION_MINOR)"."STRINGIFY(VERSION_PATCH)"+"STRINGIFY(BUILD)
+#define FIRMWARE_VER STRINGIFY(VERSION_MAJOR) "." STRINGIFY(VERSION_MINOR) "." STRINGIFY(VERSION_PATCH) "+" STRINGIFY(BUILD)
 
 #ifndef NO_ADC
 #ifdef ADS1015
@@ -242,7 +242,7 @@ const unsigned int aliveCycleT = 100; // [ms]
 const unsigned int serverPort = 23; // telnet port
 
 // the media access control (ethernet hardware) address for the shield:
-const byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };
+byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };
 #ifdef STATIC_IP
 const byte ip[] = STATIC_IP;  
 #endif
@@ -418,7 +418,7 @@ const int max_ethernet_clients = 8;
 EthernetClient clients[max_ethernet_clients];
 
 const int cmd_buf_len = 20;
-volatile char cmd_buf[cmd_buf_len] = { 0x00 };
+char cmd_buf[cmd_buf_len] = { 0x00 };
 String cmd = String("");
 volatile bool half_hour_action_done = false;
 
@@ -553,7 +553,7 @@ void command_handler(EthernetClient c, String cmd){
 #ifndef NO_ADC
   } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
     uint8_t pd = cmd.charAt(1) - '0';
-    if (pd == 1 | pd == 2){
+    if ((pd == 1) | (pd == 2)){
         c.println(ads_get_single_ended(true,pd+1));
     } else {
       ERR_MSG
@@ -872,7 +872,7 @@ void mcp23x17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
 
 void mcp23x17_all_off(void){
   uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
-  for(int mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr++){
+  for(mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr++){
     mcp_reg_addr = MCP_OLATA_ADDR; // OLATA gpio register address
     mcp_reg_value = 0x00; // all pins low
     mcp23x17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
@@ -913,9 +913,9 @@ int set_pix(String pix){
     //mcp23x17_all_off();
     mcp_dev_addr = substrate;
     if ((pixel >= 0) & (pixel <= 8)) {
-      if (pixel == 8 | pixel == 6 | pixel == 7 | pixel == 5) {
+      if ((pixel == 8) | (pixel == 6) | (pixel == 7) | (pixel == 5)) {
         mcp_reg_value = TOP; // top bus bar connection is closer to these pixels
-      } else if (pixel == 4 | pixel == 2 | pixel == 3 | pixel == 1){
+      } else if ((pixel == 4) | (pixel == 2) | (pixel == 3) | (pixel == 1)){
         mcp_reg_value = BOT; // bottom bus bar connection is closer to the rest
       } else { // turn off portA
         mcp_reg_value = 0x00;
@@ -1067,7 +1067,6 @@ int32_t ads_get_data(bool current_adc){
   int32_t data = 0;
   uint32_t data_storage = 0x00000000;
   uint8_t address;
-  uint8_t transmission_status;
   
   if (current_adc == true) {
     address = CURRENT_ADS122C04_ADDRESS;
@@ -1111,7 +1110,7 @@ uint8_t ads_write(bool current_adc, uint8_t reg, uint8_t value){
 uint8_t ads_read(bool current_adc, uint8_t reg){
   uint8_t reg_value = 0x00;
   uint8_t address;
-  uint8_t transmission_status;
+  
   if (current_adc) {
     address = CURRENT_ADS122C04_ADDRESS;
     
