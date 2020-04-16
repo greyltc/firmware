@@ -1,26 +1,22 @@
 # firmware
 Firmware design files for controlling the hardware from https://github.com/greyltc/electronics and/or https://github.com/greyltc/hardware
 
-## Compiling
-Via [arduino-cli](https://github.com/arduino/arduino-cli):
+## Compile and flash
+Via [platformio](https://github.com/arduino/arduino-cli)  
+Install platformio (yay -Syyu platformio)
 ```
-# you only need to do the following three lines once
-arduino-cli core update-index
-arduino-cli core install arduino:avr
-arduino-cli lib install "Ethernet"
-arduino-cli lib install "SD"
+git clone ${this_project} && cd ${this_project}
+mkdir -p pio
+cd pio
+platformio init --board megaatmega2560
+pio lib install 872 # Arduino's Ethernet library
+#pio lib install 342 # Adafruit's Arduino library for ADS1015/1115 ADCs (only needed for old hardware)
+ln -sf ../../microC/firmware.ino src/.
+#pio device list # to figure out where to upload
+DEVICE_PORT=/dev/ttyACMX
+pio run --target upload --upload-port ${DEVICE_PORT}
 
-cd mainArduino
-arduino-cli compile -v -o build/firmware -b arduino:avr:mega .
-# now you have the firmware in build/firmware.hex
-```
+# for debug
+#device monitor -b 115200 -p ${DEVICE_PORT}
 
-## Flashing
-Via [avrdude](http://www.nongnu.org/avrdude/):
-```
-# first, figure out what port your arduino is on:
-arduino-cli board list
-# then flash the firmware you compiled above (after editing in the correct value for -P you just discovered)
-cd mainArduino
-avrdude -v -C/etc/avrdude.conf -patmega2560 -cwiring -P/dev/ttyACMX -b115200 -D -Uflash:w:build/firmware.hex:i
 ```
