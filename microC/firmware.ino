@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 1
-#define VERSION_PATCH 1
+#define VERSION_PATCH 3
 #define BUILD 3f9a16f
 // ====== start user editable config ======
 
@@ -636,11 +636,17 @@ void command_handler(EthernetClient c, String cmd){
 #ifndef ADS1015
   } else if (cmd.startsWith(F("stream")) & (cmd.length() >= 7)){ //stream sample data from the ADC
     cmd.remove(0,6); // remove the word stream
-    c.print(F("Streaming "));
-    c.print(cmd.toInt());
-    c.print(F(" ADC samples on a 505.859375 microsecond interval..."));
-    stream_ADC(c, cmd.toInt());
-    c.println(F("ADC streaming complete."));
+    if (cmd.toInt() == 0){
+      c.print(F("Streaming forever..."));
+      stream_ADC(c, 0);
+      c.stop(); // the only way for the client to exit a neverending stream is to disconnect, so let's to that too
+    } else {
+      c.print(F("Streaming "));
+      c.print(cmd.toInt());
+      c.print(F(" ADC samples on a 505.859375 microsecond interval..."));
+      stream_ADC(c, cmd.toInt());
+      c.println(F("ADC streaming complete."));
+    }
 #endif //ADS1015
 #endif //NO_ADC
   } else if (cmd.equals("?") | cmd.equals("help")){ //help request command
@@ -1135,6 +1141,7 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
   volatile uint32_t adc_periods = 0;
   volatile uint16_t adc_crc = 0;
   volatile uint16_t adc_crc_running = 0x00;
+  bool run_forever = false;
   
   // setup ADS
   ads_write(true, 0, B1011 << 4); // set MUX. B1011 is for one photodiode (AINp=Ain3, AINn=AVSS). B1010 would be for the other one
@@ -1142,9 +1149,13 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
   ads_write(true, 2, B01100000); // DCNT=1, CRC=10, data counter byte enable and crc16 bytes enable
   ads_start_sync(true);
 
+  if (n_readings == 0ul){
+    run_forever = true;  // if the user asks to stream 0 bytes, that means we should run forever
+  }
+
   Wire.setClock(400000);// need I2C fast mode here to keep up with the ADC sample rate
   delayMicroseconds(52); // datasheet says the first conversion starts 105 clock cycles after START/SYNC (in turbo mode when t_clk=1/2.048 MHz)
-  while (adc_periods < n_readings){
+  while ( (adc_periods < n_readings) || run_forever ){
     
     while (last_counter_value == buf[0]){ // poll for new sample
       Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
@@ -1177,11 +1188,15 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
         } // end Wire.endTransmission check
       } // end Wire.write check
     } // end counter change check
-    adc_periods += (uint8_t)(buf[0] - last_counter_value); // keep track of how many time periods the ADC has seen
+    if (run_forever == false){ // only update the tracker for the number of periods the ADC has seen if were making a finite number of readings
+      adc_periods += (uint8_t)(buf[0] - last_counter_value); // keep track of how many time periods the ADC has seen
+    }
     last_counter_value = buf[0]; // remember what the last sample counter value was
-    digitalWrite(LED2_PIN, HIGH);
-    c.write((uint8_t*)buf, 4) ; //~268us
-    digitalWrite(LED2_PIN, LOW);
+    //digitalWrite(LED2_PIN, HIGH); // for debugging/testing
+    if ( c.write((uint8_t*)buf, 4) != 4 ){ //~268us the first three bytes we send up are the sample, the last byte is the counter
+      break; // bail out if the client has disconnected, the only way to exit if run_forever == true
+    }
+    //digitalWrite(LED2_PIN, LOW); // for debugging/testing
   } // end number of sample periods check
   Wire.setClock(100000);// go back to I2C standard mode
   // clean up ADS
