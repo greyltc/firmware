@@ -2,3 +2,5 @@
 *.elf
 *.mypy*
 pio/
+pio-stepper/
+pio-main/

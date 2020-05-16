@@ -34,6 +34,7 @@
 // FYI-- do something like this to enter the control interface:
 // telnet 10.42.0.54
 
+#include <Arduino.h>
 #ifndef BIT_BANG_SPI
 #include <SPI.h>
 #endif//BIT_BANG_SPI
@@ -47,8 +48,8 @@
 // set the following in Arduino/libraries/Ethernet/src/utility/w5100.h
 // #define SPI_ETHERNET_SETTINGS SPISettings(30000000, MSBFIRST, SPI_MODE0)
 
-//#include <Wire.h>
-#include "Wire.h" // today I need my fixed Wire library, https://github.com/greyltc/ArduinoCore-avr/tree/issue%2342
+#include <Wire.h>
+//#include "Wire.h" // today I need my fixed Wire library, https://github.com/greyltc/ArduinoCore-avr/tree/issue%2342
 #ifdef USE_SD
 #include <SD.h>
 #endif //USE_SD
@@ -289,7 +290,9 @@ void setup() {
   #endif
 
   Wire.begin(); // for I2C
-
+  // the wire module now times out and resets itsself to prevent lockups
+  //Wire.setWireTimeoutUs(25000, true);
+  Wire.setWireTimeoutUs(10000, true);
 
   // ============= ethernet setup ============== 
   #ifdef DEBUG
@@ -1152,12 +1155,21 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
   if (n_readings == 0ul){
     run_forever = true;  // if the user asks to stream 0 bytes, that means we should run forever
   }
-
-  Wire.setClock(400000);// need I2C fast mode here to keep up with the ADC sample rate
+  
+  // three things need to be set properly to get all the adc conversions back reliably
+  // this i2c clock rate (maybe around 1million?)
+  // the ethernet SPI clock rate (30000000 there should be fine)
+  // and the i2c bus pullup resistor value (probably something less than 1000 ohm)
+  // Wire.setClock(400000) is very safe and slow and should be able to fetch about about 75% of the samples
+  Wire.setClock(750000);// need I2C fast mode here to keep up with the ADC sample rate
   delayMicroseconds(52); // datasheet says the first conversion starts 105 clock cycles after START/SYNC (in turbo mode when t_clk=1/2.048 MHz)
-  while ( (adc_periods < n_readings) || run_forever ){
-    
+  while (run_forever || (adc_periods < n_readings)){
     while (last_counter_value == buf[0]){ // poll for new sample
+      // if the wire module saw a timeout, wait 55ms to ensure the ADC's I2C interface reset itself
+      //if (Wire.getWireTimeoutFlag()){
+      //  Wire.clearWireTimeoutFlag();
+      //  delay(55); 
+      //}
       Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
       if (Wire.write(ADS122C04_RDATA_CODE) == 1){
         if (Wire.endTransmission(false) == 0){
@@ -1183,20 +1195,18 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
             //if (adc_crc_running != 0){
             if (adc_crc_running != adc_crc){ // ~17 us
               buf[0] = last_counter_value; // crc check failure so force retransmission no matter what
-            } // end crc check
+            }// end crc check
           } // end message length check
         } // end Wire.endTransmission check
       } // end Wire.write check
     } // end counter change check
-    if (run_forever == false){ // only update the tracker for the number of periods the ADC has seen if were making a finite number of readings
-      adc_periods += (uint8_t)(buf[0] - last_counter_value); // keep track of how many time periods the ADC has seen
-    }
+    adc_periods += (uint8_t)(buf[0] - last_counter_value); // keep track of how many time periods the ADC has seen
     last_counter_value = buf[0]; // remember what the last sample counter value was
-    //digitalWrite(LED2_PIN, HIGH); // for debugging/testing
-    if ( c.write((uint8_t*)buf, 4) != 4 ){ //~268us the first three bytes we send up are the sample, the last byte is the counter
+    //digitalWrite(LED_PIN, HIGH); // for debugging/testing
+    if ((c.connected() == false) || (c.write((uint8_t*)buf, 4) != 4 )){ //~268us the first three bytes we send up are the sample, the last byte is the counter
       break; // bail out if the client has disconnected, the only way to exit if run_forever == true
     }
-    //digitalWrite(LED2_PIN, LOW); // for debugging/testing
+    //digitalWrite(LED_PIN, LOW); // for debugging/testing
   } // end number of sample periods check
   Wire.setClock(100000);// go back to I2C standard mode
   // clean up ADS
