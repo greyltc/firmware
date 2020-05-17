@@ -1,19 +1,37 @@
 #!/usr/bin/env bash
 
-# one time:
-#git clone this_repo
-#cd this_repo
-#yay -Syyu platformio
-#mkdir -p pio
-#pushd pio
-#platformio init --board megaatmega2560
-#platformio lib install 872 # install Ethernet library
-#ln -s ../../microC/firmware.ino src/.
-#popd
+PROJECT="$1"
+DEVICE_PORT=$2
 
-# compile and flash
-#pio device list # to figure out where to upload
-DEVICE_PORT=/dev/ttyACM0
-cd pio && pio run --target upload --upload-port ${DEVICE_PORT}
-#pio device monitor -b 115200 -p ${DEVICE_PORT}
+print_usage(){
+  echo "Usage: `basename $0` pio_folder [device_port]"
+  echo "where pio-folder is the fully set-up project folder (see README.md)"
+  echo "and device_port is the port to use to program the device."
+  echo "not specifying a device_port only builds."
+  echo "maybe you can find the right device_port in the output below:"
+  pio device list
+  exit -1
+}
 
+
+if [ $# -ne "2" ] && [ $# -ne "1" ]
+then
+  print_usage
+fi
+
+if [ $# -eq "2" ]
+then
+  if [ -c ${DEVICE_PORT} ]
+  then
+    pio run -d "${PROJECT}" --target upload --upload-port ${DEVICE_PORT}
+  else
+    echo "ERROR: ${DEVICE_PORT} is not a character device"
+    print_usage
+  fi
+fi
+
+
+if [ $# -eq "1" ] 
+then
+  pio run -d "${PROJECT}"
+fi

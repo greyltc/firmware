@@ -5,29 +5,35 @@
 #define LED_PIN 3
 #endif
 
+#include <Arduino.h>
 #include <uStepperS.h>
 #include <Wire.h>
 
 #define I2C_SLAVE_ADDRESS 0x04
 
-int wait_for_move(unsigned long timeout_ms = 1000);
-
 uStepperS stepper;
 const unsigned int aliveCycleT = 100; // [ms] main loop delay time
-volatile int32_t req_pos = 0; // requested position in microsteps
-volatile int32_t stage_length = 0; // this is zero when homing has not been done
-volatile bool blocked = false; // set this when we don't want to accept new movement commands
-volatile bool pending_cmd = false; // set this when the main loop should execute a command
+int32_t req_pos = 0; // requested position in microsteps
+int32_t stage_length = 0; // this is zero when homing has not been done
+bool blocked = false; // set this when we don't want to accept new movement commands
+bool pending_cmd = false; // set this when the main loop should execute a command
 
 // response buffer for i2c responses to requests from the master
 #define RESP_BUF_LEN 20
-volatile char resp_buf[RESP_BUF_LEN] = { 'f' };
+char resp_buf[RESP_BUF_LEN] = { 'f' };
 
 // command buffer
 #define CMD_BUF_LEN 20
-volatile char cmd_buf[CMD_BUF_LEN] = { 0x00 };
+char cmd_buf[CMD_BUF_LEN] = { 0x00 };
 
 #define MAIN_LOOP_DELAY 500
+
+void receiveEvent(int); // when master sends bytes
+void requestEvent(void); // when master asks for bytes
+int wait_for_move(uint32_t);
+int wait_for_move(uint32_t timeout_ms = 1000ul);
+void home(void);
+bool is_stalled(uint32_t);
 
 void setup() {
 #ifdef DEBUG
@@ -112,9 +118,9 @@ void loop() {
 // 1 completed because target position reached
 // 2 completed because there was a stall
 // 3 exited because the movement seemingly never started (after waiting for it to start for timeout_ms)
-int wait_for_move(unsigned long timeout_ms = 1000){
+int wait_for_move(uint32_t timeout_ms){ //timeout_ms defaults to 1000ul
   uint32_t ramp_stat;
-  bool saw_zerowait = false;
+  //bool saw_zerowait = false;
   bool saw_stall = false;
   bool saw_position_reached = false;
   bool saw_nonzero_velocity = false;
@@ -134,9 +140,9 @@ int wait_for_move(unsigned long timeout_ms = 1000){
       saw_stall = true;
     }
 
-    if ( (ramp_stat & ((uint32_t)1)<<11) == ((uint32_t)1<<11) ){ // zerowait bit
-      saw_zerowait = true;
-    }
+    //if ( (ramp_stat & ((uint32_t)1)<<11) == ((uint32_t)1<<11) ){ // zerowait bit
+    //  saw_zerowait = true;
+    //}
 
     if ( (ramp_stat & ((uint32_t)1)<<9) == ((uint32_t)1<<9) ){  // position reached bit
       saw_position_reached = true;
@@ -144,7 +150,7 @@ int wait_for_move(unsigned long timeout_ms = 1000){
     
     if ( (ramp_stat & ((uint32_t)1)<<10) != ((uint32_t)1<<10) )  { // non-zero velocity
         saw_nonzero_velocity = true;
-        saw_zerowait = false; // clear this if we've seen it
+        //saw_zerowait = false; // clear this if we've seen it
         //saw_position_reached = false;
         //saw_stall = false;
       } else { // the velocity is now zero, what should we do?
@@ -257,16 +263,16 @@ bool go_to (int32_t pos) {
 }
 
 // homing/stage length measurement task
-void home(){
+void home(void){
   int32_t tmp_stage_len = 0;
   blocked = true; // block movement during homing
   stage_length = -1;
 
 #ifdef DEBUG
   Serial.println("Homing procedure initiated!");
-  Serial.println(wait_for_move(100));
+  Serial.println(wait_for_move(100ul));
 #else
-  wait_for_move(100);
+  wait_for_move(100ul);
 #endif // DEBUG
   // jog negatively
   stepper.driver.writeRegister( VMAX_REG, stepper.driver.VMAX );

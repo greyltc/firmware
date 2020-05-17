@@ -125,7 +125,6 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <Arduino.h>
-#include <EEPROM.h>
 #include <inttypes.h>
 #include <uStepperServo.h>
 #define CW 1	/**< DESCRIPTION PENDING */
@@ -219,13 +218,6 @@ class uStepperS;
 #define PULSEFILTERKI 1900.0*ENCODERINTPERIOD
 
 /**
- * @brief	Interrupt routine for critical tasks.
- *
- *			This interrupt routine is in charge of sampling the encoder, process the data and handle PID
- */
-extern "C" void TIMER1_COMPA_vect(void) __attribute__ ((signal,used));
-
-/**
  * @brief      Used by dropin feature to take in step pulses
  *
  *             This interrupt routine is used by the dropin feature to keep
@@ -255,7 +247,6 @@ class uStepperS
 friend class uStepperDriver;
 friend class uStepperEncoder;
 friend void interrupt0(void);
-friend void TIMER1_COMPA_vect(void) __attribute__ ((signal,used));
 public:			
 
 	/** Instantiate object for the driver */
@@ -466,7 +457,7 @@ public:
 	 *
 	 * @return     The angle moved.
 	 */
-	bool uStepperS::getMotorState(uint8_t statusType = POSITION_REACHED);
+	bool getMotorState(uint8_t statusType = POSITION_REACHED);
 
 	/**
 	 * @brief      Stop the motor
@@ -504,20 +495,6 @@ public:
 	 */
 	void disablePid(void);
 
-	/**
-	 * @brief      	Moves the motor to its physical limit, without limit switch
-	 *
-	 *              This function, makes the motor run continously, untill the
-	 *				encoder detects a stall, at which point the motor is assumed
-	 *				to be at it's limit.
-	 *
-	 * @param[in]  	dir  Direction to search for limit
-	 *
-	 * @param[in]  	stallSensitivity  Sensitivity of stall detection (0.0 - 1.0), low is more sensitive
-	 *
-	 * @return 		Degrees turned from calling the function, till end was reached
-	 */
-	float moveToEnd(bool dir, float stallSensitivity = 0.992);
 
 	/**
 	 * @brief      This method returns the current PID error
@@ -656,8 +633,6 @@ private:
 
 	void filterSpeedPos(posFilter_t *filter, int32_t steps);
 
-	float pid(float error);
-	bool detectStall(int32_t stepsMoved);
 	dropinCliSettings_t dropinSettings;
 	bool loadDropinSettings(void);
 	void saveDropinSettings(void);

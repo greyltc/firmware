@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 1
-#define VERSION_PATCH 3
+#define VERSION_PATCH 4
 #define BUILD 3f9a16f
 // ====== start user editable config ======
 
@@ -1193,10 +1193,10 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
   while (run_forever || (adc_periods < n_readings)){
     while (last_counter_value == buf[0]){ // poll for new sample
       // if the wire module saw a timeout, wait 55ms to ensure the ADC's I2C interface reset itself
-      //if (Wire.getWireTimeoutFlag()){
-      //  Wire.clearWireTimeoutFlag();
-      //  delay(55); 
-      //}
+      if (Wire.getWireTimeoutFlag()){
+        Wire.clearWireTimeoutFlag();
+        delay(55); 
+      }
       Wire.beginTransmission(CURRENT_ADS122C04_ADDRESS);
       if (Wire.write(ADS122C04_RDATA_CODE) == 1){
         if (Wire.endTransmission(false) == 0){
