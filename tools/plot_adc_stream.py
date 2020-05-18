@@ -86,10 +86,11 @@ def get_datapoint(s):
 
 class MyTelnet(Telnet):
     def read_response(self, timeout=None):
-        resp = self.read_until(PROMPT,timeout=timeout).rstrip(PROMPT).decode().strip()
+        resp = self.read_until(PROMPT,timeout=timeout)
+        ret = resp.rstrip(PROMPT).decode().strip()
         if len(resp) == 0:
             raise(ValueError("Got no response"))
-        return resp
+        return ret
 
     def send_cmd(self, cmd):
         return self.write(cmd.encode()+EOL)

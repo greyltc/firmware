@@ -100,7 +100,7 @@ void uStepperS::setup(	uint8_t mode,
 							uint8_t runCurrent,
 							uint8_t holdCurrent)
 {
-
+	dropinCliSettings_t tempSettings;
 	this->pidDisabled = 1;
 	// Should setup mode etc. later
 	this->mode = mode;
@@ -125,6 +125,83 @@ void uStepperS::setup(	uint8_t mode,
 	this->setHoldCurrent(25.0);
 
 	encoder.setHome();
+
+	if(this->mode)
+	{
+		if(this->mode == DROPIN)
+		{
+			//Set Enable, Step and Dir signal pins from 3dPrinter controller as inputs
+			pinMode(2,INPUT);		
+			pinMode(3,INPUT);
+			pinMode(4,INPUT);
+			//Enable internal pull-up resistors on the above pins
+			digitalWrite(2,HIGH);
+			digitalWrite(3,HIGH);
+			digitalWrite(4,HIGH);
+			delay(10000);
+			attachInterrupt(0, interrupt0, FALLING);
+			attachInterrupt(1, interrupt1, CHANGE);
+			this->driver.setDeceleration( 0xFFFE);
+			this->driver.setAcceleration( 0xFFFE );
+			Serial.begin(9600);
+
+			tempSettings.P.f = pTerm;
+			tempSettings.I.f = iTerm;
+			tempSettings.D.f = dTerm;
+			tempSettings.invert = invert;
+			tempSettings.runCurrent = runCurrent;
+			tempSettings.holdCurrent = holdCurrent;
+			tempSettings.checksum = this->dropinSettingsCalcChecksum(&tempSettings);
+
+			if(tempSettings.checksum != EEPROM.read(sizeof(dropinCliSettings_t)))
+			{
+				this->dropinSettings = tempSettings;
+				this->saveDropinSettings();
+				EEPROM.put(sizeof(dropinCliSettings_t),this->dropinSettings.checksum);
+				this->loadDropinSettings();
+			}
+			else
+			{
+				if(!this->loadDropinSettings())
+				{
+					this->dropinSettings = tempSettings;
+					this->saveDropinSettings();
+					EEPROM.put(sizeof(dropinCliSettings_t),this->dropinSettings.checksum);
+					this->loadDropinSettings();
+				}
+			}
+
+			
+  			this->dropinPrintHelp();
+		}		
+		else
+		{
+			//Scale supplied controller coefficents. This is done to enable the user to use easier to manage numbers for these coefficients.
+			this->pTerm = pTerm; 
+			this->iTerm = iTerm * ENCODERINTPERIOD;    
+			this->dTerm = dTerm * ENCODERINTFREQ;    
+		}
+	}
+
+	this->moveAngle(0);
+	//this->driver.setShaftDirection(0);
+
+	//while(this->getMotorState());
+
+	//if(this->encoder.getAngleMoved() < -5)
+	//{
+	//	this->driver.setShaftDirection(1);
+	//}
+	//else
+	//{
+	//	this->driver.setShaftDirection(0);
+	//}
+	
+	encoder.setHome();
+
+	this->pidDisabled = 0;
+
+	DDRB |= (1 << 4);
 }
 
 void uStepperS::moveSteps( int32_t steps )
@@ -174,6 +251,43 @@ void uStepperS::moveToAngle( float angle )
 	else
 	{
 		this->moveSteps( steps );
+	}
+}
+
+bool uStepperS::detectStall(int32_t stepsMoved)
+{
+	static float oldTargetPosition;
+	static float oldEncoderPosition;
+	static float encoderPositionChange;
+	static float targetPositionChange;
+	float encoderPosition = ((float)this->encoder.angleMoved*ENCODERDATATOSTEP);
+	static float internalStall = 0.0;
+
+	encoderPositionChange *= 0.99;
+	encoderPositionChange += 0.01*(oldEncoderPosition - encoderPosition);
+	oldEncoderPosition = encoderPosition;
+
+	targetPositionChange *= 0.99;
+	targetPositionChange += 0.01*(oldTargetPosition - stepsMoved);
+	oldTargetPosition = stepsMoved;
+
+	if(abs(encoderPositionChange) < abs(targetPositionChange)*0.5)
+	{
+		internalStall *= this->stallSensitivity;
+		internalStall += 1.0-this->stallSensitivity;
+	}
+	else
+	{
+		internalStall *= this->stallSensitivity;
+	}
+
+	if(internalStall >= 0.95)		//3 timeconstants
+	{
+		this->stall = 1;
+	}
+	else
+	{
+		this->stall = 0;
 	}
 }
 
@@ -406,6 +520,70 @@ void interrupt0(void)
 	}
 }
 
+void TIMER1_COMPA_vect(void)
+{
+	uint16_t curAngle;
+	int32_t deltaAngle;
+	int32_t stepsMoved;
+	int32_t stepCntTemp;
+	float error;
+	float output;
+	sei();
+	
+	curAngle = pointer->encoder.captureAngle();
+	stepsMoved = pointer->driver.getPosition();
+	
+	curAngle -= pointer->encoder.encoderOffset;
+	pointer->encoder.angle = curAngle;
+
+	deltaAngle = (int32_t)pointer->encoder.oldAngle - (int32_t)curAngle;
+	pointer->encoder.oldAngle = curAngle;
+
+	if(deltaAngle < -32768)
+	{
+		deltaAngle += 65535;
+	}
+	else if(deltaAngle > 32768)
+	{
+		deltaAngle -= 65535;
+	}
+	pointer->encoder.angleMoved += deltaAngle;
+
+	if(pointer->mode == DROPIN)
+	{	
+		cli();
+			stepCntTemp = pointer->stepCnt;
+		sei();
+
+		pointer->filterSpeedPos(&pointer->externalStepInputFilter, stepCntTemp);
+
+		if(!pointer->pidDisabled)
+		{
+			error = stepCntTemp - (pointer->encoder.angleMoved * ENCODERDATATOSTEP);
+			pointer->currentPidSpeed = pointer->externalStepInputFilter.velIntegrator;
+			pointer->pid(error);
+		}
+		return;
+	}
+	pointer->filterSpeedPos(&pointer->encoder.encoderFilter, pointer->encoder.angleMoved);
+	if(pointer->mode == PID)
+	{
+		if(!pointer->pidDisabled)
+		{
+			pointer->currentPidError = stepsMoved - pointer->encoder.angleMoved * ENCODERDATATOSTEP;
+			if(abs(pointer->currentPidError) >= 10.0 )
+			{
+				pointer->driver.writeRegister(XACTUAL,pointer->encoder.angleMoved * ENCODERDATATOSTEP);
+				pointer->driver.writeRegister(XTARGET,pointer->driver.xTarget);
+			}
+			
+			pointer->currentPidSpeed = pointer->encoder.encoderFilter.velIntegrator * ENCODERDATATOSTEP;
+		}
+	}
+
+	pointer->detectStall(stepsMoved);
+}
+
 void uStepperS::enablePid(void)
 {
 	cli();
@@ -420,11 +598,98 @@ void uStepperS::disablePid(void)
 	sei();
 }
 
+float uStepperS::moveToEnd(bool dir, float stallSensitivity = 0.992)
+{
+	float length = this->encoder.getAngleMoved();
+
+	if(dir == CW)
+	{
+		this->setRPM(10);
+	}
+	else
+	{
+		this->setRPM(-10);
+	}
+	delay(1000);
+	while(!this->isStalled(stallSensitivity))
+	{
+	}
+	this->stop();
+
+	length -= this->encoder.getAngleMoved();
+	return abs(length);
+}
+
 float uStepperS::getPidError(void)
 {
 	return this->currentPidError;
 }
 
+float uStepperS::pid(float error)
+{
+	float u;
+	float limit = abs(this->currentPidSpeed) + 150000.0;
+	static float integral;
+	static bool integralReset = 0;
+	static float errorOld, differential = 0.0;
+
+	this->currentPidError = error;
+
+	u = error*this->pTerm;
+
+	if(u > 0.0)
+	{
+		if(u > limit)
+		{
+			u = limit;
+		}
+	}
+	else if(u < 0.0)
+	{
+		if(u < -limit)
+		{
+			u = -limit;
+		}
+	}
+
+	integral += error*this->iTerm;
+
+	if(integral > 3000000.0)
+	{
+		integral = 3000000.0;
+	}
+	else if(integral < -3000000.0)
+	{
+		integral = -3000000.0;
+	}
+
+	if(error > -100 && error < 100)
+	{
+		if(!integralReset)
+		{
+			integralReset = 1;
+			integral = 0;
+		}
+	}
+	else
+	{
+		integralReset = 0;
+	}
+
+	u += integral;
+	
+	differential *= 0.9;
+	differential += 0.1*((error - errorOld)*this->dTerm);
+
+	errorOld = error;
+
+	u += differential;
+
+	u *= this->stepsPerSecondToRPM;
+	this->setRPM(u);
+	this->driver.setDeceleration( 0xFFFE );
+	this->driver.setAcceleration( 0xFFFE );
+}
 
 void uStepperS::setProportional(float P)
 {
@@ -894,4 +1159,46 @@ void uStepperS::dropinPrintHelp()
 	Serial.println(F("Set Hold Current (percent): 'holdCurrent=50.0;'"));
 	Serial.println(F(""));
 	Serial.println(F(""));
+}
+
+bool uStepperS::loadDropinSettings(void)
+{
+	dropinCliSettings_t tempSettings;
+
+	EEPROM.get(0,tempSettings);
+
+	if(this->dropinSettingsCalcChecksum(&tempSettings) != tempSettings.checksum)
+	{
+		return 0;
+	}
+
+	this->dropinSettings = tempSettings;
+	this->setProportional(this->dropinSettings.P.f);
+	this->setIntegral(this->dropinSettings.I.f);
+	this->setDifferential(this->dropinSettings.D.f);
+	this->invertDropinDir((bool)this->dropinSettings.invert);
+	this->setCurrent(this->dropinSettings.runCurrent);	
+	this->setHoldCurrent(this->dropinSettings.holdCurrent);	
+	return 1;
+}
+
+void uStepperS::saveDropinSettings(void)
+{
+	this->dropinSettings.checksum = this->dropinSettingsCalcChecksum(&this->dropinSettings);
+
+	EEPROM.put(0,this->dropinSettings);
+}
+
+uint8_t uStepperS::dropinSettingsCalcChecksum(dropinCliSettings_t *settings)
+{
+	uint8_t i;
+	uint8_t checksum = 0xAA;
+	uint8_t *p = (uint8_t*)settings;
+
+	for(i=0; i < 15; i++)
+	{		
+		checksum ^= *p++;
+	}
+
+	return checksum;
 }

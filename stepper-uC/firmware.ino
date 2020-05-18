@@ -5,11 +5,12 @@
 #define LED_PIN 3
 #endif
 
-#include <Arduino.h>
 #include <uStepperS.h>
 #include <Wire.h>
 
 #define I2C_SLAVE_ADDRESS 0x04
+
+int wait_for_move(unsigned long timeout_ms = 1000);
 
 uStepperS stepper;
 const unsigned int aliveCycleT = 100; // [ms] main loop delay time
@@ -17,23 +18,18 @@ int32_t req_pos = 0; // requested position in microsteps
 int32_t stage_length = 0; // this is zero when homing has not been done
 bool blocked = false; // set this when we don't want to accept new movement commands
 bool pending_cmd = false; // set this when the main loop should execute a command
+volatile bool send_later = false; // the master has asked for bytes but we have none ready
 
 // response buffer for i2c responses to requests from the master
 #define RESP_BUF_LEN 20
-char resp_buf[RESP_BUF_LEN] = { 'f' };
+static uint8_t resp_buf[RESP_BUF_LEN] = { 'f' };
+volatile int bytes_ready = 0;
 
 // command buffer
 #define CMD_BUF_LEN 20
-char cmd_buf[CMD_BUF_LEN] = { 0x00 };
+static uint8_t cmd_buf[CMD_BUF_LEN] = { 0x00 };
 
 #define MAIN_LOOP_DELAY 500
-
-void receiveEvent(int); // when master sends bytes
-void requestEvent(void); // when master asks for bytes
-int wait_for_move(uint32_t);
-int wait_for_move(uint32_t timeout_ms = 1000ul);
-void home(void);
-bool is_stalled(uint32_t);
 
 void setup() {
 #ifdef DEBUG
@@ -70,28 +66,85 @@ void setup() {
 #endif // DEBUG
 }
 
+#ifndef NO_LED
+uint32_t led_cycle_counter = 0ul;
+#endif // NO_LED
+
+uint32_t tmp;
+char this_cmd;
+
 void loop() {
 #ifndef NO_LED
+  led_cycle_counter++;
   //toggle the alive pin
-  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+  if (led_cycle_counter%5000 == 0){
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+  }
 #endif // NO_LED
-  delay(aliveCycleT);
+  //delay(aliveCycleT);
 
   // handle a command
   if (pending_cmd){ // there's a command to be processed
     pending_cmd = false;
-    switch(cmd_buf[0]){
-      case 'h':
-        home();
+    this_cmd = cmd_buf[0];
+    switch(this_cmd){
+      case 'g':  //goto
+        memcpy(&req_pos, &cmd_buf[1], 4); // copy in target
+        if (go_to(req_pos)){
+          resp_buf[0] = 'p';
+          bytes_ready = 1;
+         } else {
+          resp_buf[0] = 'f';
+          bytes_ready = 1;
+        }
         break;
+      case 'h':
+        if (blocked == false){
+          home();
+          resp_buf[0] = 'p';
+          bytes_ready = 1;
+        } else {
+          resp_buf[0] = 'f';
+          bytes_ready = 1;
+        }
+        break;
+      case 'l': // get stage length
+        resp_buf[0] = 'p'; // press p for pass
+        resp_buf[1] = (stage_length >> 24) & 0xFF;
+        resp_buf[2] = (stage_length >> 16) & 0xFF;
+        resp_buf[3] = (stage_length >> 8) & 0xFF;
+        resp_buf[4] = stage_length & 0xFF;
+        bytes_ready = 5;
+       break;
+      case 'r': // read back position request
+        if (blocked){
+          resp_buf[0] = 'f';
+          bytes_ready = 1;
+        } else {
+          resp_buf[0] = 'p'; // press p for pass
+          tmp = stepper.driver.readRegister(XACTUAL); // TODO: one day think about sending the encoder position
+          resp_buf[1] = (tmp >> 24) & 0xFF;
+          resp_buf[2] = (tmp >> 16) & 0xFF;
+          resp_buf[3] = (tmp >> 8) & 0xFF;
+          resp_buf[4] = tmp & 0xFF;
+          bytes_ready = 5;
+        }
+        
 #ifdef DEBUG
       default:
         Serial.println("Got unknown command.");
 #endif // DEBUG
     }
   }
+  // the master asked us for bytes and we have some ready
+  if (send_later && (bytes_ready > 0)){
+    Wire.write((uint8_t*)resp_buf, bytes_ready);
+    Wire.flush();
+    send_later = false;
+    bytes_ready = 0;
+  }
 
-#ifdef DEBUG
+#ifdef DEBUG // bouncy debug
   int move_result;
   // do a bounce routine
   if (stage_length > 0) {
@@ -118,7 +171,7 @@ void loop() {
 // 1 completed because target position reached
 // 2 completed because there was a stall
 // 3 exited because the movement seemingly never started (after waiting for it to start for timeout_ms)
-int wait_for_move(uint32_t timeout_ms){ //timeout_ms defaults to 1000ul
+int wait_for_move(unsigned long timeout_ms){ //timeout_ms defaults to 1000
   uint32_t ramp_stat;
   //bool saw_zerowait = false;
   bool saw_stall = false;
@@ -263,16 +316,16 @@ bool go_to (int32_t pos) {
 }
 
 // homing/stage length measurement task
-void home(void){
+void home(){
   int32_t tmp_stage_len = 0;
   blocked = true; // block movement during homing
   stage_length = -1;
 
 #ifdef DEBUG
   Serial.println("Homing procedure initiated!");
-  Serial.println(wait_for_move(100ul));
+  Serial.println(wait_for_move(100));
 #else
-  wait_for_move(100ul);
+  wait_for_move(100);
 #endif // DEBUG
   // jog negatively
   stepper.driver.writeRegister( VMAX_REG, stepper.driver.VMAX );
@@ -341,53 +394,65 @@ void receiveEvent(int howMany){
     cmd_buf[i] = Wire.read(); // put the char into the command buffer
     i++;
   }
+  pending_cmd = true;
 }
 
 
 // fires when the master asks for bytes
 // an ISR
-void requestEvent(void){
-  //Serial.println('req');
-  uint32_t tmp = 0;
-  switch(cmd_buf[0]){
-    case 'h':  //home
-     if (blocked){
-       Wire.write('f'); // press f for fail
-     } else {
-       Wire.write('p'); // press p for pass
-       pending_cmd = true;
-     }
-     break;
-    case 'g':  //goto
-      memcpy(&req_pos, &cmd_buf[1], 4); // copy in target
-      if (go_to(req_pos)){
-        Wire.write('p'); //press P for pass
-      } else {
-        Wire.write('f'); //press F for fail
-      }
-      break;
-    case 'l': // get stage length
-      resp_buf[0] = 'p'; // press p for pass
-      resp_buf[1] = (stage_length >> 24) & 0xFF;
-      resp_buf[2] = (stage_length >> 16) & 0xFF;
-      resp_buf[3] = (stage_length >> 8) & 0xFF;
-      resp_buf[4] = stage_length & 0xFF;
-      Wire.write((uint8_t*)resp_buf, 5);
-      break;
-    case 'r': // read back position request
-      if (blocked){
-        Wire.write('f'); // press f for fail
-      } else {
-        resp_buf[0] = 'p'; // press p for pass
-        tmp = stepper.driver.readRegister(XACTUAL); // TODO: one day think about sending the encoder position
-        resp_buf[1] = (tmp >> 24) & 0xFF;
-        resp_buf[2] = (tmp >> 16) & 0xFF;
-        resp_buf[3] = (tmp >> 8) & 0xFF;
-        resp_buf[4] = tmp & 0xFF;
-        Wire.write((uint8_t*)resp_buf, 5);
-      }
-      break;
-    default:
-      Wire.write('f'); //press F for fail
-  }
+bool requestEvent(void){
+   send_later = false;
+   if (bytes_ready > 0){
+     Wire.write((uint8_t*)resp_buf, bytes_ready);
+     bytes_ready = 0;
+   } else {
+     send_later = true;
+   }
+  //send_later = true;
+
+  // //Serial.println('req');
+  // uint32_t tmp = 0;
+  // bool send_later = false;
+  // switch(cmd_buf[0]){
+  //   case 'h':  //home
+  //    if (blocked){
+  //      Wire.write('f'); // press f for fail
+  //      send_later = false;
+  //    } else {
+  //      send_later = true;
+  //    }
+  //    break;
+  //   case 'g':  //goto
+  //     memcpy(&req_pos, &cmd_buf[1], 4); // copy in target
+  //     if (go_to(req_pos)){
+  //       Wire.write('p'); //press P for pass
+  //     } else {
+  //       Wire.write('f'); //press F for fail
+  //     }
+  //     break;
+  //   case 'l': // get stage length
+  //     resp_buf[0] = 'p'; // press p for pass
+  //     resp_buf[1] = (stage_length >> 24) & 0xFF;
+  //     resp_buf[2] = (stage_length >> 16) & 0xFF;
+  //     resp_buf[3] = (stage_length >> 8) & 0xFF;
+  //     resp_buf[4] = stage_length & 0xFF;
+  //     Wire.write((uint8_t*)resp_buf, 5);
+  //     break;
+  //   case 'r': // read back position request
+  //     if (blocked){
+  //       Wire.write('f'); // press f for fail
+  //     } else {
+  //       resp_buf[0] = 'p'; // press p for pass
+  //       tmp = stepper.driver.readRegister(XACTUAL); // TODO: one day think about sending the encoder position
+  //       resp_buf[1] = (tmp >> 24) & 0xFF;
+  //       resp_buf[2] = (tmp >> 16) & 0xFF;
+  //       resp_buf[3] = (tmp >> 8) & 0xFF;
+  //       resp_buf[4] = tmp & 0xFF;
+  //       Wire.write((uint8_t*)resp_buf, 5);
+  //     }
+  //     break;
+  //   default:
+  //     Wire.write('f'); //press F for fail
+  // }
+  return(send_later);
 }
