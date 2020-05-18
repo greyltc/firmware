@@ -55,6 +55,7 @@ void setup() {
   
   // setup I2C
   Wire.begin(I2C_SLAVE_ADDRESS);
+  Wire.setWireTimeoutUs(25000, true);
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(requestEvent); // register event
 #ifdef DEBUG
@@ -67,21 +68,22 @@ void setup() {
 }
 
 #ifndef NO_LED
-uint32_t led_cycle_counter = 0ul;
+unsigned int led_loops = 5000;
 #endif // NO_LED
+
+unsigned int num_loops = 0;
 
 uint32_t tmp;
 char this_cmd;
 
 void loop() {
+num_loops++;
 #ifndef NO_LED
-  led_cycle_counter++;
   //toggle the alive pin
-  if (led_cycle_counter%5000 == 0){
+  if (num_loops%led_loops == 0){
     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
   }
 #endif // NO_LED
-  //delay(aliveCycleT);
 
   // handle a command
   if (pending_cmd){ // there's a command to be processed

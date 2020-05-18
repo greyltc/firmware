@@ -239,7 +239,6 @@ const unsigned int PE_SCK_PIN = 26; // arduino pin for SPI bus for port expander
 const unsigned int PE_CS_PIN = 48; // arduino pin for expanders chip select pin
 #endif
 
-const unsigned int aliveCycleT = 100; // [ms]
 const unsigned int serverPort = 23; // telnet port
 
 // the media access control (ethernet hardware) address for the shield:
@@ -267,7 +266,7 @@ File fsd;
 // declare functuions TODO: move to header file
 uint8_t ads_reset(bool);
 uint8_t setup_MCP(void);
-void do_every_half_hour(void);
+void do_every_long_while(void);
 void report_firmware_version(EthernetClient);
 void send_prompt(EthernetClient);
 void get_cmd(char*, EthernetClient, int);
@@ -450,27 +449,32 @@ EthernetClient clients[max_ethernet_clients];
 const int cmd_buf_len = 20;
 char cmd_buf[cmd_buf_len] = { 0x00 };
 String cmd = String("");
-volatile bool half_hour_action_done = false;
+
+uint32_t tmp;
+char this_cmd;
+
+uint32_t loop_counter = 0ul;
+#ifndef NO_LED
+uint32_t led_blink_loops = 5000ul; // led changes state every this many loops
+#endif // NO_LED
+
+uint32_t long_while_loops = 50000000ul; 
 
 // main program loop
 void loop() {
+  loop_counter++;
   pixSetErr = ERR_GENERIC;
-  
-  //half hour task launcher
-  if (micros() > 1800000000){
-    if (half_hour_action_done == false){
-	     do_every_half_hour();
-	     half_hour_action_done = true;
-    }
-  } else {
-	   half_hour_action_done = false;
-  }
-  
+
 #ifndef NO_LED
-  //toggle the alive pin
-  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-#endif
-  delay(aliveCycleT);
+  if (loop_counter%led_blink_loops == 0){
+    //toggle the alive LED pin
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+  }
+#endif // NO_LED
+  
+  if (loop_counter%long_while_loops == 0){
+    do_every_long_while();
+  }
 
   // wait for a new client:
   EthernetClient new_client = server.accept();
@@ -693,8 +697,8 @@ void command_handler(EthernetClient c, String cmd){
   }
 }
 
-// gets run about every 30 mins
-void do_every_half_hour(void){
+// gets run once per long while
+void do_every_long_while(void){
   #ifdef DEBUG
   Serial.println(F("Requesting DHCP renewal"));
   #endif
