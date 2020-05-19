@@ -68,16 +68,16 @@ void setup() {
 }
 
 #ifndef NO_LED
-unsigned int led_loops = 5000;
+uint32_t led_loops = 5000ul;
 #endif // NO_LED
 
-unsigned int num_loops = 0;
+uint32_t num_loops = 0ul;
 
 uint32_t tmp;
 char this_cmd;
 
 void loop() {
-num_loops++;
+  num_loops++;
 #ifndef NO_LED
   //toggle the alive pin
   if (num_loops%led_loops == 0){

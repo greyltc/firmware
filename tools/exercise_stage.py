@@ -102,7 +102,7 @@ def home(tn, axis, timeout = 40):
     response = tn.read_response(timeout=timeout) # wait for homing to complete
 
     if response != '':
-        raise(ValueError(r"Homing the stage failed: {response}"))
+        raise(ValueError(f"Homing the stage failed: {response}"))
     else:
         if tn.empty_response == True: # we never got the prompt back
             ret_val = -2
