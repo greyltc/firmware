@@ -103,10 +103,10 @@ void uStepperDriver::init( uStepperS * _pointer ){
 	//this->writeRegister( COOLCONF, SGT(0x40) | SEMIN(15)); // -64 least difficult to stall
 	// set up stall threshold
 	//this->writeRegister( COOLCONF, SGT(0x3F)); // 63  most difficult to stall
-	//this->writeRegister( COOLCONF, SGT(0x0F)); //
+	this->writeRegister( COOLCONF, SGT(0x0F)); //
 	//this->writeRegister( COOLCONF, SGT(0x00));
 	//this->writeRegister( COOLCONF, SGT(0x60)); // -32
-	this->writeRegister( COOLCONF, SGT(0x0A)); // -48
+	//this->writeRegister( COOLCONF, SGT(0x0A)); // -48
 	//this->writeRegister( COOLCONF, SGT(0x40)); // -64 least difficult to stall
 	//this->writeRegister( COOLCONF, SGT(0x00)| SEMIN(7)); // -64 least difficult to stall
 

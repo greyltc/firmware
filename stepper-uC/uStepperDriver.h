@@ -79,9 +79,9 @@
 
 #define PWMCONF				0x70	/**< DESCRIPTION PENDING */
 
-#define FREEWHEEL(n)		(((n)&0x3UL)<<20)	/**< DESCRIPTION PENDING */
-#define PWM_AUTOSCALE(n)	(((n)&0x1UL)<<18)	/**< DESCRIPTION PENDING */
-#define PWM_FREQ(n)			(((n)&0x3UL)<<16)	/**< DESCRIPTION PENDING */
+#define FREEWHEEL(n)		(((n)&0x3ul)<<20)	/**< DESCRIPTION PENDING */
+#define PWM_AUTOSCALE(n)	(((n)&0x1ul)<<18)	/**< DESCRIPTION PENDING */
+#define PWM_FREQ(n)			(((n)&0x3ul)<<16)	/**< DESCRIPTION PENDING */
 #define PWM_GRAD(n)			(((n)&0xFF)<<8)		/**< DESCRIPTION PENDING */
 #define PWM_AMPL(n)			(((n)&0xFF)<<0)		/**< DESCRIPTION PENDING */
 
@@ -90,16 +90,16 @@
 
 #define CHOPCONF		0x6C					/**< DESCRIPTION PENDING */
 
-#define DISS2G(n)		(((n)&0x1UL)<<30)		/**< DESCRIPTION PENDING */
-#define DEDGE(n)		(((n)&0x1UL)<<29)		/**< DESCRIPTION PENDING */
-#define INTPOL(n)		(((n)&0x1UL)<<28)	/**< DESCRIPTION PENDING */
-#define MRES(n)			(((n)&0xFUL)<<24)	/**< DESCRIPTION PENDING */
-#define SYNC(n)			(((n)&0xFUL)<<20)	/**< DESCRIPTION PENDING */
-#define VHIGHCHM(n)		(((n)&0x1UL)<<19)	/**< DESCRIPTION PENDING */
-#define VHIGHFS(n)		(((n)&0x1UL)<<18)	/**< DESCRIPTION PENDING */
-#define VSENSE(n)		(((n)&0x1UL)<<17)	/**< DESCRIPTION PENDING */
-#define TBL(n)			(((n)&0x3UL)<<15)	/**< DESCRIPTION PENDING */
-#define CHM(n)			(((n)&0x1UL)<<14)	/**< DESCRIPTION PENDING */
+#define DISS2G(n)		(((n)&0x1ul)<<30)		/**< DESCRIPTION PENDING */
+#define DEDGE(n)		(((n)&0x1ul)<<29)		/**< DESCRIPTION PENDING */
+#define INTPOL(n)		(((n)&0x1ul)<<28)	/**< DESCRIPTION PENDING */
+#define MRES(n)			(((n)&0xFul)<<24)	/**< DESCRIPTION PENDING */
+#define SYNC(n)			(((n)&0xFul)<<20)	/**< DESCRIPTION PENDING */
+#define VHIGHCHM(n)		(((n)&0x1ul)<<19)	/**< DESCRIPTION PENDING */
+#define VHIGHFS(n)		(((n)&0x1ul)<<18)	/**< DESCRIPTION PENDING */
+#define VSENSE(n)		(((n)&0x1ul)<<17)	/**< DESCRIPTION PENDING */
+#define TBL(n)			(((n)&0x3ul)<<15)	/**< DESCRIPTION PENDING */
+#define CHM(n)			(((n)&0x1ul)<<14)	/**< DESCRIPTION PENDING */
 #define RNDTF(n)		(((n)&0x1)<<13)	/**< DESCRIPTION PENDING */
 #define DISFDCC(n)		(((n)&0x1)<<12)	/**< DESCRIPTION PENDING */
 #define TFD3(n)			(((n)&0x1)<<11)	/**< DESCRIPTION PENDING */
@@ -111,9 +111,9 @@
 /* CoolStep smart current control register and stallGuard2 configuration **/
 
 #define COOLCONF		0x6D	/**< DESCRIPTION PENDING */
-#define SFILT(n)		(((n)&0x1UL)<<24)	/**< DESCRIPTION PENDING */
-#define SGT(n)			(((n)&0x7F)<<16)	/**< DESCRIPTION PENDING */
-#define SEIMIN(n)		(((n)&0x1UL)<<15)	/**< DESCRIPTION PENDING */
+#define SFILT(n)		(((n)&0x1ul)<<24)	/**< DESCRIPTION PENDING */
+#define SGT(n)			(((n)&0x7Ful)<<16)	/**< DESCRIPTION PENDING */
+#define SEIMIN(n)		(((n)&0x1ul)<<15)	/**< DESCRIPTION PENDING */
 #define SEDN(n)			(((n)&0x3)<<13)	/**< DESCRIPTION PENDING */
 #define SEMAX(n)		(((n)&0xF)<<8)	/**< DESCRIPTION PENDING */
 #define SEUP(n)			(((n)&0x3)<<5)	/**< DESCRIPTION PENDING */
@@ -121,14 +121,14 @@
 
 
 #define DCCTRL			0x6E	/**< DESCRIPTION PENDING */
-#define DC_SG(n)		(((n)&0xFFUL)<<16)	/**< DESCRIPTION PENDING */
+#define DC_SG(n)		(((n)&0xFFul)<<16)	/**< DESCRIPTION PENDING */
 #define DC_TIME(n)		(((n)&0x3FF)<<0)	/**< DESCRIPTION PENDING */
 
 #define DRV_STATUS 		0x6F	/**< stallGuard2 value and driver error flags*/
 #define STALLED_BIT		1<<24	/**< DESCRIPTION PENDING */
 
 
-#define IHOLDDELAY(n)	(((n)&0xFUL)<<16)	/**< DESCRIPTION PENDING */
+#define IHOLDDELAY(n)	(((n)&0xFul)<<16)	/**< DESCRIPTION PENDING */
 #define IRUN(n)			(((n)&0x1F)<<8)	/**< DESCRIPTION PENDING */
 #define IHOLD(n)		(((n)&0x1F)<<0)	/**< DESCRIPTION PENDING */
 

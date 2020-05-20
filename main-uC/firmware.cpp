@@ -253,6 +253,11 @@ uint8_t connected_devices = 0x00;
 SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
 #endif
 
+// I2C timeouts
+//#define I2C_TIMEOUT_US 10000000ul; //10s
+#define I2C_TIMEOUT_US 25000ul //25ms
+#define HOMING_I2C_TIMEOUT_US 100000000ul //100s
+
 // setup telnet server
 EthernetServer server(serverPort);
 
@@ -271,7 +276,7 @@ void report_firmware_version(EthernetClient);
 void send_prompt(EthernetClient);
 void get_cmd(char*, EthernetClient, int);
 void command_handler(EthernetClient, String);
-void send_home(EthernetClient, int);
+void send_home(EthernetClient, int, uint32_t);
 void get_len(EthernetClient, int);
 void get_pos(EthernetClient, int);
 void go_to(EthernetClient, int, int32_t);
@@ -317,8 +322,7 @@ void setup() {
 
   Wire.begin(); // for I2C
   // the wire module now times out and resets itsself to prevent lockups
-  //Wire.setWireTimeoutUs(25000, true);
-  Wire.setWireTimeoutUs(10000000, true);
+  Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
 
   // ============= ethernet setup ============== 
   #ifdef DEBUG
@@ -542,7 +546,7 @@ void command_handler(EthernetClient c, String cmd){
   } else if (cmd.startsWith("h") & (cmd.length() == 2)){ //home request command
     int ax = cmd.charAt(1) - '0';
     if ((ax >= 0) & (ax <= 2)){
-        send_home(c, ax);
+        send_home(c, ax, HOMING_I2C_TIMEOUT_US);
     } else {
       ERR_MSG
     }
@@ -716,7 +720,7 @@ void report_firmware_version(EthernetClient c){
 }
 
 // sends home command to an axis
-void send_home(EthernetClient c, int axis){
+void send_home(EthernetClient c, int axis, uint32_t timeout){
   char result = 'f';
   int addr;
   int bytes_to_read;
@@ -726,7 +730,9 @@ void send_home(EthernetClient c, int axis){
     Wire.beginTransmission(addr);
     if (Wire.write('h') == 1){  // sends instruction byte
       if (Wire.endTransmission(false) == 0){
+        Wire.setWireTimeoutUs(timeout, true);
         bytes_to_read = Wire.requestFrom(addr, 1, true);
+        Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
         if(bytes_to_read == 1){
           result =  Wire.read();
         }

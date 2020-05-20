@@ -95,7 +95,7 @@ def goto(tn, axis, position, timeout = 20):
 # -1 if the homing timed out
 # -2 if there was a programming error
 # the length of the stage in steps for a successful home
-def home(tn, axis, timeout = 40):
+def home(tn, axis, timeout = 80):
     ret_val = -2
     print('HOMING!')
     tn.send_cmd('h0')
