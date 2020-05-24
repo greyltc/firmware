@@ -6,6 +6,7 @@ import socket
 import time
 import itertools
 import sys
+import random
 
 PROMPT = b'>>> '  # the firmware's prompt
 EOL = b'\r\n'  # client-->server transmission line ending the firmware expects
@@ -61,6 +62,7 @@ class MyTelnet(Telnet):
 # -2 if the timeout expired before it got there
 # -3 is a programming error
 def goto(tn, axis, position, timeout = 20):
+    position = round(position) # must be a whole number of steps
     ret_val = -3
     retries = 5
     each_timeout = timeout/retries
@@ -135,9 +137,13 @@ with MyTelnet(args.server_hostname) as tn:
             print(f'The stage is {home_result} steps long.')
 
         length = home_result
-        itc = itertools.cycle([round(length*0.1), round(length*0.9)])
+        avg_stop_from_end = 0.1
+        itc = itertools.cycle([length*avg_stop_from_end, length*(1-avg_stop_from_end)])
         while True:
             target = next(itc)
+            # let's not bounce on the exact same place every time
+            target = round(target + target*(random.random()*2 -1)*avg_stop_from_end*0.8)
+            print(f"New target set: {target}")
             result = goto(tn, args.axis, target)
             if result !=0:
                 if result == -1:
