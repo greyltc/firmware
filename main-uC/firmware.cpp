@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 1
-#define VERSION_PATCH 8
+#define VERSION_PATCH 9
 #define BUILD 3f9a16f
 // ====== start user editable config ======
 
@@ -187,10 +187,10 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 const char AXIS_ADDR[3] = {0x04, 0x05, 0x06};
 
 // otter relay addresses (the actual I2C addresses used are 0x40 | this value)
-const char OMUX_ADDR[10] = {0x00, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
+//const char OMUX_ADDR[10] = {0x00, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
 
 // otter relay I2C MUX channels
-const char OMUX_CHAN[10] = {0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01};
+//const char OMUX_CHAN[10] = {0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01};
 //OMUX_XXXX[0] -- > serves relay banks 1 and 2 on the bottom (0th) relay board: substrates A0 & B0
 //OMUX_XXXX[1] -- > serves relay banks 3 and 4 on the bottom (0th) relay board: substrates C0 & D0
 //OMUX_XXXX[2] -- > serves relay banks 1 and 2 on the        (1st) relay board: substrates A1 & B1
@@ -266,7 +266,8 @@ byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };
 const byte ip[] = STATIC_IP;  
 #endif
 
-uint8_t connected_devices = 0x00;
+// bitmask for which port expander chips were discovered
+uint32_t connected_devices = 0x00000000;
 
 #ifndef BIT_BANG_SPI
 SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
@@ -287,37 +288,46 @@ EthernetServer server(serverPort);
 File fsd;
 #endif //USE_SD
 
-// declare functuions TODO: move to header file
-uint8_t ads_reset(bool);
-uint8_t setup_MCP(void);
+// declare functions TODO: move to header file
+
+// utility functions
 void do_every_long_while(void);
 void report_firmware_version(EthernetClient);
 void send_prompt(EthernetClient);
 void get_cmd(char*, EthernetClient, int);
 void command_handler(EthernetClient, String);
+
+// stage functions
 void send_home(EthernetClient, int, uint32_t);
 void get_len(EthernetClient, int);
 void get_pos(EthernetClient, int);
 void go_to(EthernetClient, int, int32_t);
-float ads_check_supply(bool);
-void mcp23S17_all_off(void);
+
+// port expander functions
+
+void tca9546_write(uint8_t, bool, bool, bool, bool);
+uint8_t tca9546_read(uint8_t);
+uint32_t mcp_setup(bool);
+uint8_t mcp_read(bool, uint8_t, uint8_t);
+void mcp_write(bool, uint8_t, uint8_t, uint8_t);
+bool mcp_check(bool, uint8_t);
+void mcp_all_off(bool);
 int set_pix(String);
-int32_t ads_get_single_ended(bool, int);
-bool mcp23S17_MUXCheck(uint8_t);
-uint8_t mcp23S17_read(uint8_t, uint8_t);
-uint8_t mcp23017_read(uint8_t, uint8_t);
-void mcp23S17_write(uint8_t, uint8_t, uint8_t);
-void mcp23017_write(uint8_t, uint8_t, uint8_t);
+
+// adc functions
+uint8_t ads_reset(bool);
 float ads_get_resistor(void);
+float ads_check_supply(bool);
+int32_t ads_get_single_ended(bool, int);
 void stream_ADC(EthernetClient, uint32_t);
 uint8_t ads_write(bool, uint8_t, uint8_t);
 int32_t ads_single_shot(bool);
 uint8_t ads_read(bool, uint8_t);
 uint8_t ads_start_sync(bool);
 int32_t ads_get_data(bool);
+
+// misc
 void easter_egg(void);
-void tca9546_write(uint8_t, bool, bool, bool, bool);
-uint8_t tca9546_read(uint8_t);
 
 void setup() {
   #ifdef DEBUG
@@ -346,7 +356,7 @@ void setup() {
 
   Wire.begin(); // for I2C
   // the wire module now times out and resets itsself to prevent lockups
-  //Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
+  Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
 
   // ============= ethernet setup ============== 
   #ifdef DEBUG
@@ -458,7 +468,8 @@ void setup() {
   #endif // DEBUG
 
   // setup the port expanders
-  connected_devices = setup_MCP();
+  connected_devices = mcp_setup(true);
+  // TODO: make use of this value somehow
   
   #ifdef DEBUG
   Serial.println(F("done."));
@@ -605,7 +616,7 @@ void command_handler(EthernetClient c, String cmd){
     c.println(F("V"));
 #endif //NO_ADC
   } else if (cmd.equals("s")){ //pixel deselect command
-    mcp23S17_all_off();
+    mcp_all_off(true);
   } else if (cmd.startsWith("s") & (cmd.length() == 3)){ //pixel select command
     pixSetErr = set_pix(cmd.substring(1));
     if (pixSetErr !=0){
@@ -624,8 +635,7 @@ void command_handler(EthernetClient c, String cmd){
   } else if (cmd.startsWith("c") & (cmd.length() == 2)){ //mux check command
     uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
     if ((substrate >= 0) & (substrate <= 7)){
-      bool result = mcp23S17_MUXCheck(substrate);
-      if (!result){
+      if (!mcp_check(true, substrate)){
         c.println(F("MUX not found"));
       }
     } else {
@@ -637,9 +647,9 @@ void command_handler(EthernetClient c, String cmd){
     if ((substrate >= 0) & (substrate <= 7)){
       mcp_dev_addr = substrate;
 
-      mcp_reg_value = mcp23S17_read(mcp_dev_addr, MCP_OLATA_ADDR); // read OLATA
+      mcp_reg_value = mcp_read(true, mcp_dev_addr, MCP_OLATA_ADDR); // read OLATA
       mcp_reg_value |= (1 << 2); // flip on V_D_EN bit
-      mcp23S17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+      mcp_write(true, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
       
       c.print(F("Board "));
       cmd.toUpperCase();
@@ -648,7 +658,7 @@ void command_handler(EthernetClient c, String cmd){
       c.print(F(" sense resistor = ")); 
       c.print(ads_get_resistor(),0);
       mcp_reg_value &= ~ (1 << 2); // flip off V_D_EN bit
-      mcp23S17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+      mcp_write(true, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
       c.println(F(" Ohm"));
     } else {
       ERR_MSG
@@ -728,28 +738,22 @@ void command_handler(EthernetClient c, String cmd){
 }
 
 void easter_egg(void){
+  bool spi = false;
+  uint32_t expanders = 0x00000000;
+
+  // set i2c mux
   tca9546_write(TCA9546_ADDRESS, false, false, false, true);
 
-  uint8_t mcp_dev_addr, mcp_reg_value;
-  mcp_dev_addr = 0x00;
+  expanders = mcp_setup(spi);
 
-  mcp_reg_value = 0x08; //set IOCON --> HACON.HAEN
-  mcp23017_write(mcp_dev_addr, MCP_IOCON_ADDR, mcp_reg_value);
+  // close a relay
+  mcp_write(spi, 0x00, MCP_OLATA_ADDR, 0x01);
 
-  mcp_reg_value = 0x00; // PORTA out low
-  mcp23017_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+  // close another relay
+  mcp_write(spi, 0x00, MCP_OLATB_ADDR, 0x01);
 
-  mcp_reg_value = 0x00; // PORTB out low
-  mcp23017_write(mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value);
-
-  mcp_reg_value = 0x00; //all of PORTA to are outputs
-  mcp23017_write(mcp_dev_addr, MCP_IODIRA_ADDR, mcp_reg_value);
-
-  mcp_reg_value = 0x00; //all of PORTB to are outputs
-  mcp23017_write(mcp_dev_addr, MCP_IODIRB_ADDR, mcp_reg_value);
-
-  // switch the relays
-  mcp23017_write(mcp_dev_addr, MCP_OLATA_ADDR, 0x01);
+  // unset i2c mux
+  tca9546_write(TCA9546_ADDRESS, false, false, false, false);
 }
 
 // gets run once per long while
@@ -977,116 +981,121 @@ void tca9546_write(uint8_t address, bool ch3, bool ch2, bool ch1, bool ch0) {
   }
 }
 
-// reads a byte from a register address for mcp23017 (I2C)
-uint8_t mcp23017_read(uint8_t dev_address, uint8_t reg_address){
-  uint8_t crtl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
+// reads a byte from a register address for mcp2XS17
+uint8_t mcp_read(bool spi, uint8_t dev_address, uint8_t reg_address){
+  uint8_t crtl_byte;
   uint8_t result = 0x00;
-  uint8_t n_to_read = 1; // number of bytes we expect to read
-  int tries_left = 5; // number of retries left
+  int tries_left = 5; // number of retries left for i2c
 
-  while (tries_left > 0){
-    Wire.beginTransmission(crtl_byte);
-    if (Wire.write(reg_address) == 1){
-      if (Wire.endTransmission(false) == 0){
-        if(Wire.requestFrom(crtl_byte, n_to_read, (uint8_t)true) == n_to_read){
-          result = Wire.read();
-          break;
-        } // end message length check
-      } // end Wire.endTransmission check
-    } // end Wire.write check
-    tries_left--;
-    delayMicroseconds(5); // min bus free time for 100kHz comms mode
-  }
-  //TODO: we won't know if we ran out of tries
-  return(result);
-}
-
-// reads a byte from a register address for mcp23S17 (SPI)
-uint8_t mcp23S17_read(uint8_t dev_address, uint8_t reg_address){
-  uint8_t crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_READ | (dev_address << 1);
-  uint8_t result = 0x00;
-
-  digitalWrite(PE_CS_PIN, LOW); //select
-  #ifdef BIT_BANG_SPI
-  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, crtl_byte);
-  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
-  result = shiftIn(PE_MISO_PIN, PE_SCK_PIN, MSBFIRST);
-  #else
-  //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ethernet ic is not selected
-  //SPI.endTransaction();
-  SPI.beginTransaction(switch_spi_settings);
-  SPI.transfer(crtl_byte); // read operation
-  SPI.transfer(reg_address); // iodirA register address
-  result = SPI.transfer(0x00); // read the register
-  SPI.endTransaction();
-  #endif
-  digitalWrite(PE_CS_PIN, HIGH); //deselect
-  return(result);
-}
-
-// writes a byte to a register address for mcp23017 (I2C) 
-void mcp23017_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
-  uint8_t crtl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
-  uint8_t payload[2] = {reg_address,  value};
-  int tries_left = 5; // number of retries left
-
-  while (tries_left > 0){
-    Wire.beginTransmission(crtl_byte);
-    if (Wire.write(payload, 2) == 2){
-      if (Wire.endTransmission(true) == 0){
-        break;
-      }
+  if (spi){
+    crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_READ | (dev_address << 1);
+    digitalWrite(PE_CS_PIN, LOW); //select
+#ifdef BIT_BANG_SPI
+    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, crtl_byte);
+    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
+    result = shiftIn(PE_MISO_PIN, PE_SCK_PIN, MSBFIRST);
+#else
+    //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ethernet ic is not selected
+    //SPI.endTransaction();
+    SPI.beginTransaction(switch_spi_settings);
+    SPI.transfer(crtl_byte); // read operation
+    SPI.transfer(reg_address); // iodirA register address
+    result = SPI.transfer(0x00); // read the register
+    SPI.endTransaction();
+#endif
+    digitalWrite(PE_CS_PIN, HIGH); //deselect
+  } else { //i2c
+    //TODO: handle i2c mux here to unify address space
+    crtl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
+    while (tries_left > 0){
+      Wire.beginTransmission(crtl_byte);
+      if (Wire.write(reg_address) == 1){
+        if (Wire.endTransmission(false) == 0){
+          if(Wire.requestFrom(crtl_byte, (uint8_t)1, (uint8_t)true) == 1){
+            result = Wire.read();
+            break;
+          } // end message length check
+        } // end Wire.endTransmission check
+      } // end Wire.write check
+      tries_left--;
+      delayMicroseconds(5); // min bus free time for 100kHz comms mode
     }
-    tries_left--;
-    delayMicroseconds(5); // min bus free time for 100kHz comms mode
+  }
+
+  return(result);
+}
+
+// writes a byte to a register address for mcp23X17
+void mcp_write(bool spi, uint8_t dev_address, uint8_t reg_address, uint8_t value){
+  uint8_t ctrl_byte;
+  uint8_t payload[2];
+  int tries_left = 5; // number of retries left (for i2c)
+  if (spi){
+    ctrl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_WRITE | (dev_address << 1);
+    digitalWrite(PE_CS_PIN, LOW); //select
+#ifdef BIT_BANG_SPI
+    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, crtl_byte);
+    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
+    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, value);
+#else
+    //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ethernet ic is not selected
+    //SPI.endTransaction();
+    SPI.beginTransaction(switch_spi_settings);
+    SPI.transfer(ctrl_byte); // write operation
+    SPI.transfer(reg_address); // iodirA register address
+    SPI.transfer(value); // write the register
+    SPI.endTransaction();
+#endif
+    digitalWrite(PE_CS_PIN, HIGH); //deselect
+  } else { // i2c
+  //TODO: handle i2c mux here to unify address space
+    ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
+    payload[0] = reg_address;
+    payload[1] = value;
+
+    while (tries_left > 0){
+      Wire.beginTransmission(ctrl_byte);
+      if (Wire.write(payload, 2) == 2){
+        if (Wire.endTransmission(true) == 0){
+          break;
+        }
+      }
+      tries_left--;
+      delayMicroseconds(5); // min bus free time for 100kHz comms mode
+    }
   }
 }
 
-// writes a byte to a register address for mcp23S17 (SPI) 
-void mcp23S17_write(uint8_t dev_address, uint8_t reg_address, uint8_t value){
-  uint8_t crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_WRITE | (dev_address << 1);
+void mcp_all_off(bool spi){
+  uint8_t mcp_dev_addr, max_address;
+  if (spi){
+    max_address = 7;
+  } else {
+    max_address = 9;
+  }
 
-  digitalWrite(PE_CS_PIN, LOW); //select
-  #ifdef BIT_BANG_SPI
-  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, crtl_byte);
-  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
-  shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, value);
-  #else
-  //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ethernet ic is not selected
-  //SPI.endTransaction();
-  SPI.beginTransaction(switch_spi_settings);
-  SPI.transfer(crtl_byte); // write operation
-  SPI.transfer(reg_address); // iodirA register address
-  SPI.transfer(value); // write the register
-  SPI.endTransaction();
-  #endif
-  digitalWrite(PE_CS_PIN, HIGH); //deselect
-}
+  for(mcp_dev_addr = 0; mcp_dev_addr <= max_address; mcp_dev_addr++){
+    // set output latch A low
+    mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, 0x00);
 
-void mcp23S17_all_off(void){
-  uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
-  for(mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr++){
-    mcp_reg_addr = MCP_OLATA_ADDR; // OLATA gpio register address
-    mcp_reg_value = 0x00; // all pins low
-    mcp23S17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
-
-    mcp_reg_addr = MCP_OLATB_ADDR; // OLATB register address
-    mcp23S17_write(mcp_dev_addr, mcp_reg_addr, mcp_reg_value);
+    // set output latch B low
+    mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, 0x00);
   }
 }
 
 // checks for ability to communicate with a mux chip
-bool mcp23S17_MUXCheck(uint8_t substrate){
+bool mcp_check(bool spi, uint8_t address){
   bool foundIT = false;
   uint8_t previous = 0x00;
   uint8_t response = 0x00;
-  const uint8_t tester = 0b10101010;
-  previous = mcp23S17_read(substrate, MCP_DEFVALA_ADDR); //and try to read it back
-  mcp23S17_write(substrate, MCP_DEFVALA_ADDR, tester); //program the test value
-  response = mcp23S17_read(substrate, MCP_DEFVALA_ADDR); //and try to read it back
-  mcp23S17_write(substrate, MCP_DEFVALA_ADDR, previous); //revert the old value
+  uint8_t test_pattern = 0b10100010;
 
-  if (response == tester){
+  previous = mcp_read(spi, address, MCP_DEFVALA_ADDR); //and try to read it back
+  mcp_write(spi, address, MCP_DEFVALA_ADDR, test_pattern); //program the test value
+  response = mcp_read(spi, address, MCP_DEFVALA_ADDR); //and try to read it back
+  mcp_write(spi, address, MCP_DEFVALA_ADDR, previous); //revert the old value
+
+  if (response == test_pattern){
     foundIT = true;
   } else {
     foundIT = false;
@@ -1094,16 +1103,61 @@ bool mcp23S17_MUXCheck(uint8_t substrate){
   return (foundIT);
 }
 
+uint32_t mcp_setup(bool spi){
+  // comms variables
+  uint8_t mcp_dev_addr, mcp_reg_value;
+  uint32_t connected_devices_mask = 0x00000000;
+  uint8_t max_address;
+
+  if (spi){
+    // pulse CS to clear out weirdness from startup
+    digitalWrite(PE_CS_PIN, LOW); //select
+    delayMicroseconds(1);
+    digitalWrite(PE_CS_PIN, HIGH); //deselect
+    max_address = 7;
+  } else {
+    max_address = 9;
+  }
+
+  //loop through all the expanders and set their registers properly
+  for (mcp_dev_addr = 0; mcp_dev_addr <= max_address; mcp_dev_addr ++){
+    
+    if (spi){
+      //probs this first one programs all the parts at once (if they just POR'd)
+      mcp_reg_value = 0x08; //set IOCON --> HACON.HAEN enable pin addresses (spi only)
+      mcp_write(spi, mcp_dev_addr, MCP_IOCON_ADDR, mcp_reg_value);
+    }
+
+    mcp_reg_value = 0x00; // PORTA out low
+    mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+
+    mcp_reg_value = 0x00; // PORTB out low
+    mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value);
+
+    mcp_reg_value = 0x00; //all of PORTA to are outputs
+    mcp_write(spi, mcp_dev_addr, MCP_IODIRA_ADDR, mcp_reg_value);
+  
+    mcp_reg_value = 0x00; //all of PORTB to are outputs
+    mcp_write(spi, mcp_dev_addr, MCP_IODIRB_ADDR, mcp_reg_value);
+
+    if (mcp_check(spi, mcp_dev_addr)) {
+      connected_devices_mask |= 0x01 << mcp_dev_addr;
+    }
+  }
+  return (connected_devices);
+}
+
 int set_pix(String pix){
+  bool spi = true;
   int error = NO_ERROR;
-  // places to keep mcp23S17 comms variables
+  // places to keep mcp23X17 comms variables
   uint8_t mcp_dev_addr, mcp_reg_value;
   uint8_t mcp_readback_value = 0x00;
   
   uint8_t substrate = pix.charAt(0) - 'a'; //convert a, b, c... to 0, 1, 2...
   uint8_t pixel = pix.charAt(1) - '0';
   if ((substrate >= 0) & (substrate <= 7)) {
-    //mcp23S17_all_off();
+    //mcp23X17_all_off();
     mcp_dev_addr = substrate;
     if ((pixel >= 0) & (pixel <= 8)) {
       if ((pixel == 8) | (pixel == 6) | (pixel == 7) | (pixel == 5)) {
@@ -1113,8 +1167,8 @@ int set_pix(String pix){
       } else { // turn off portA
         mcp_reg_value = 0x00;
       }
-      mcp23S17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value); //enable TOP or BOT bus connection
-      mcp_readback_value = mcp23S17_read(mcp_dev_addr,MCP_OLATA_ADDR);
+      mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value); //enable TOP or BOT bus connection
+      mcp_readback_value = mcp_read(spi, mcp_dev_addr,MCP_OLATA_ADDR);
       
       if (mcp_readback_value != mcp_reg_value) {
         error += ERR_SELECTION_A_DISAGREE;
@@ -1125,8 +1179,8 @@ int set_pix(String pix){
       } else {
         mcp_reg_value = 0x01 << (pixel -1);
       }
-      mcp23S17_write(mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value); //enable pixel connection
-      mcp_readback_value = mcp23S17_read(mcp_dev_addr,MCP_OLATB_ADDR);
+      mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value); //enable pixel connection
+      mcp_readback_value = mcp_read(spi, mcp_dev_addr,MCP_OLATB_ADDR);
 
       if (mcp_readback_value != mcp_reg_value) {
         error += ERR_SELECTION_B_DISAGREE;
@@ -1400,40 +1454,3 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
 }
 #endif // NOT ADS1015
 #endif //NO_ADC
-
-uint8_t setup_MCP(void){
-  // pulse CS to clear out weirdness from startup
-  digitalWrite(PE_CS_PIN, LOW); //select
-  delayMicroseconds(1);
-  digitalWrite(PE_CS_PIN, HIGH); //deselect
-  
-  // places to keep mcp23S17 comms variables
-  volatile uint8_t mcp_dev_addr, mcp_reg_value;
-  volatile uint8_t connected_devices_mask = 0x00;
-  
-  //loop through all the expanders and set their registers properly
-  for (mcp_dev_addr = 0; mcp_dev_addr <= 7; mcp_dev_addr ++){
-    
-    //probs this first one programs all the parts at once (if they just POR'd)
-    mcp_reg_value = 0x08; //set IOCON --> HACON.HAEN
-    mcp23S17_write(mcp_dev_addr, MCP_IOCON_ADDR, mcp_reg_value);
-
-    mcp_reg_value = 0x00; // PORTA out low
-    mcp23S17_write(mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
-
-    mcp_reg_value = 0x00; // PORTB out low
-    mcp23S17_write(mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value);
-
-    mcp_reg_value = 0x00; //all of PORTA to are outputs
-    mcp23S17_write(mcp_dev_addr, MCP_IODIRA_ADDR, mcp_reg_value);
-  
-    mcp_reg_value = 0x00; //all of PORTB to are outputs
-    mcp23S17_write(mcp_dev_addr, MCP_IODIRB_ADDR, mcp_reg_value);
-
-    mcp_reg_value = mcp23S17_read(mcp_dev_addr, MCP_IOCON_ADDR);
-    if (mcp_reg_value == 0x08) { //IOCON --> HACON.HAEN should be set
-      connected_devices_mask |= 0x01 << mcp_dev_addr;
-    }
-  }
-  return (connected_devices);
-}
