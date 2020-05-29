@@ -1,8 +1,11 @@
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 1
-#define VERSION_PATCH 9
+#define VERSION_MINOR 2
+#define VERSION_PATCH 1
 #define BUILD 3f9a16f
 // ====== start user editable config ======
+
+// when I2C_MUX is defined, we control the pixel selection multiplexer via I2C a la Otter
+#define I2C_MUX
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
@@ -68,7 +71,7 @@ const char help_s_a[] PROGMEM = "s";
 const char help_s_b[] PROGMEM = "\"sXY[Z]\", selects pixel Y on substrate X if no Z. selects pixel Z on substrate XY if Z is given. just \"s\" disconnects all pixels";
 
 const char help_c_a[] PROGMEM = "c";
-const char help_c_b[] PROGMEM = "\"cX\", checks that MUX X is connected";
+const char help_c_b[] PROGMEM = "\"cX\", checks that MUX X is connected. just \"c\" returns a bitmask of connected port expanders";
 
 const char help_h_a[] PROGMEM = "h";
 const char help_h_b[] PROGMEM = "\"hX\", homes axis X, just \"h\" homes all axes";
@@ -101,7 +104,10 @@ const char help_stream_b[] PROGMEM = "\"stream\" streams ADC data";
 #endif //ADS1015
 #endif //NO_ADC
 
-const char help_exit_a[] PROGMEM = "disconnect or close or logout or exit or quit";
+const char help_reset_a[] PROGMEM = "reset";
+const char help_reset_b[] PROGMEM = "ends session and resets the microcontroller";
+
+const char help_exit_a[] PROGMEM = "disconnect";
 const char help_exit_b[] PROGMEM = "ends session";
 
 const char help_help_a[] PROGMEM = "? or help";
@@ -124,6 +130,7 @@ const char* const help[] PROGMEM  = {
   help_stream_a, help_stream_b,
 #endif //ADS1015
 #endif //NO_ADC
+  help_reset_a, help_reset_b,
   help_exit_a, help_exit_b,
   help_help_a, help_help_b
 };
@@ -217,6 +224,11 @@ union Lb{
 #define ERR_GENERIC -5 //Uninitialized error code
 #define ERR_SELECTION_DOUBLE_DISAGREE -7 //MCP did not read back the value we expected port A and B
 
+// switch layouts
+#define NO_SWITCHES -1
+#define SNAITH_SWITCHES 0
+#define OTTER_SWITCHES 1
+
 // wiring to the expander
 #define NONE 0x00
 //PORTB connections
@@ -273,6 +285,12 @@ uint32_t connected_devices = 0x00000000;
 SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
 #endif
 
+#ifdef I2C_MUX
+bool MCP_SPI = false;
+#else
+bool MCP_SPI = true;
+#endif
+
 // I2C timeouts
 //#define I2C_TIMEOUT_US 10000000ul; //10s
 #define I2C_TIMEOUT_US 25000ul //25ms
@@ -296,6 +314,7 @@ void report_firmware_version(EthernetClient);
 void send_prompt(EthernetClient);
 void get_cmd(char*, EthernetClient, int);
 void command_handler(EthernetClient, String);
+void reset(void);
 
 // stage functions
 void send_home(EthernetClient, int, uint32_t);
@@ -467,9 +486,8 @@ void setup() {
   Serial.print(F("Probing for port expanders..."));
   #endif // DEBUG
 
-  // setup the port expanders
-  connected_devices = mcp_setup(true);
-  // TODO: make use of this value somehow
+  connected_devices = mcp_setup(MCP_SPI);
+  // TODO: make use of connected_devices somehow
   
   #ifdef DEBUG
   Serial.println(F("done."));
@@ -571,6 +589,9 @@ void loop() {
   } // end client disconnection check
 } // end main program loop
 
+void reset(void) {
+  asm volatile ("jmp 0");
+}
 
 // does an action based on command string from client
 void command_handler(EthernetClient c, String cmd){
@@ -616,8 +637,12 @@ void command_handler(EthernetClient c, String cmd){
     c.println(F("V"));
 #endif //NO_ADC
   } else if (cmd.equals("s")){ //pixel deselect command
+#ifdef SPI_MUX
+    mcp_all_off(false);
+#else
     mcp_all_off(true);
-  } else if (cmd.startsWith("s") & (cmd.length() == 3)){ //pixel select command
+#endif
+  } else if (cmd.startsWith("s") & ((cmd.length() == 3) | (cmd.length() == 4))){ //pixel select command
     pixSetErr = set_pix(cmd.substring(1));
     if (pixSetErr !=0){
       c.print(F("ERROR: Pixel selection error code "));
@@ -632,14 +657,19 @@ void command_handler(EthernetClient c, String cmd){
       ERR_MSG
     }
 #endif // NO_ADC
-  } else if (cmd.startsWith("c") & (cmd.length() == 2)){ //mux check command
-    uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
-    if ((substrate >= 0) & (substrate <= 7)){
-      if (!mcp_check(true, substrate)){
-        c.println(F("MUX not found"));
+  } else if (cmd.startsWith("c")){ //mux check command
+    if (cmd.length() == 2){
+      uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+      if ((substrate >= 0) & (substrate <= 9)){
+        if (!mcp_check(MCP_SPI, substrate)){
+          c.println(F("MUX not found"));
+        }
+      } else {
+        ERR_MSG
       }
-    } else {
-      ERR_MSG
+    } else if (cmd.length() == 1){
+      //connected_devices = mcp_setup(MCP_SPI);
+      c.println(mcp_setup(MCP_SPI));
     }
 #ifndef NO_ADC
   } else if (cmd.startsWith("d") & (cmd.length() == 2)){ //pogo pin board sense divider measure command
@@ -728,8 +758,12 @@ void command_handler(EthernetClient c, String cmd){
       c.print(F(": "));
       c.println(PGM2STR(help, 2*i+1));
     }
-  } else if (cmd.equals(F("!greyrules"))){ 
+  } else if (cmd.equals(F("!gr"))){ 
     easter_egg();
+  } else if (cmd.equals(F("reset"))){
+    c.stop();
+    delay(100);
+    reset();
   } else if (cmd.equals(F("exit")) | cmd.equals(F("close")) | cmd.equals(F("disconnect")) | cmd.equals(F("quit")) | cmd.equals(F("logout"))){ //logout
     c.stop();
   } else { //bad command
@@ -741,19 +775,41 @@ void easter_egg(void){
   bool spi = false;
   uint32_t expanders = 0x00000000;
 
-  // set i2c mux
-  tca9546_write(TCA9546_ADDRESS, false, false, false, true);
-
   expanders = mcp_setup(spi);
 
-  // close a relay
-  mcp_write(spi, 0x00, MCP_OLATA_ADDR, 0x01);
+
+  //while(true){
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, 0x00);
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(6) | bit(7))); // lights up pix marked 1
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(1) | bit(6) | bit(7))); // lights up pix marked 4
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(2) | bit(6) | bit(7))); // lights up pix marked 2
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(3) | bit(6) | bit(7))); // lights up pix marked 5
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(4) | bit(6) | bit(7))); // lights up pix marked 3
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(5) | bit(6) | bit(7))); // lights up pix marked 6
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, 0x00);
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(1) | bit(2) | bit(6) | bit(7)));
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(3) | bit(4) | bit(5) | bit(6) | bit(7)));
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(1) | bit(2) | bit(3) | bit(4) | bit(5) | bit(6) | bit(7)));
+    delay(500);
+    mcp_write(spi, 0x00, MCP_OLATA_ADDR, 0x00);
+  //}
+
+  // close some relays
+  //mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(6) | bit(7)));
 
   // close another relay
-  mcp_write(spi, 0x00, MCP_OLATB_ADDR, 0x01);
+  //mcp_write(spi, 0x00, MCP_OLATB_ADDR, 0x01);
 
-  // unset i2c mux
-  tca9546_write(TCA9546_ADDRESS, false, false, false, false);
 }
 
 // gets run once per long while
@@ -953,25 +1009,22 @@ void tca9546_write(uint8_t address, bool ch3, bool ch2, bool ch1, bool ch0) {
   uint8_t control = 0x00;
   int tries_left = 5; // number of retries left
 
-  // I think the channel silk labeling the output channels
-  // on the NCD boards are messed up so I'll change this
-  // code so that it matches the reversed channel numbers
   if (ch0){
-    control |= 1<3;
+    control |= (0x01<<0);
   }
   if (ch1){
-    control |= 1<2;
+    control |= (0x01<<1);
   }
   if (ch2){
-    control |= 1<1;
+    control |= (0x01<<2);
   }
   if (ch3){
-    control |= 1<0;
+    control |= (0x01<<3);
   }
 
   while (tries_left > 0){
     Wire.beginTransmission(address);
-     if (Wire.write(control) == 1){
+    if (Wire.write(control) == 1){
       if (Wire.endTransmission() == 0){
        break;
       }
@@ -983,35 +1036,40 @@ void tca9546_write(uint8_t address, bool ch3, bool ch2, bool ch1, bool ch0) {
 
 // reads a byte from a register address for mcp2XS17
 uint8_t mcp_read(bool spi, uint8_t dev_address, uint8_t reg_address){
-  uint8_t crtl_byte;
+  uint8_t ctrl_byte;
   uint8_t result = 0x00;
   int tries_left = 5; // number of retries left for i2c
 
   if (spi){
-    crtl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_READ | (dev_address << 1);
+    ctrl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_READ | (dev_address << 1);
     digitalWrite(PE_CS_PIN, LOW); //select
 #ifdef BIT_BANG_SPI
-    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, crtl_byte);
+    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, ctrl_byte);
     shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
     result = shiftIn(PE_MISO_PIN, PE_SCK_PIN, MSBFIRST);
 #else
     //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ethernet ic is not selected
     //SPI.endTransaction();
     SPI.beginTransaction(switch_spi_settings);
-    SPI.transfer(crtl_byte); // read operation
+    SPI.transfer(ctrl_byte); // read operation
     SPI.transfer(reg_address); // iodirA register address
     result = SPI.transfer(0x00); // read the register
     SPI.endTransaction();
 #endif
     digitalWrite(PE_CS_PIN, HIGH); //deselect
   } else { //i2c
-    //TODO: handle i2c mux here to unify address space
-    crtl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
+    if (dev_address <= 7){ // use the first port on the i2c mux for the first 8 expanders
+      tca9546_write(TCA9546_ADDRESS, false, false, false, true);
+      ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
+    } else { // use the second port on the i2c mux for the last two expanders
+      tca9546_write(TCA9546_ADDRESS, false, false, true, false);
+      ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | (dev_address-8);
+    }
     while (tries_left > 0){
-      Wire.beginTransmission(crtl_byte);
+      Wire.beginTransmission(ctrl_byte);
       if (Wire.write(reg_address) == 1){
         if (Wire.endTransmission(false) == 0){
-          if(Wire.requestFrom(crtl_byte, (uint8_t)1, (uint8_t)true) == 1){
+          if(Wire.requestFrom(ctrl_byte, (uint8_t)1, (uint8_t)true) == 1){
             result = Wire.read();
             break;
           } // end message length check
@@ -1020,6 +1078,8 @@ uint8_t mcp_read(bool spi, uint8_t dev_address, uint8_t reg_address){
       tries_left--;
       delayMicroseconds(5); // min bus free time for 100kHz comms mode
     }
+    // close off the i2c mux
+    tca9546_write(TCA9546_ADDRESS, false, false, false, false);
   }
 
   return(result);
@@ -1034,7 +1094,7 @@ void mcp_write(bool spi, uint8_t dev_address, uint8_t reg_address, uint8_t value
     ctrl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_WRITE | (dev_address << 1);
     digitalWrite(PE_CS_PIN, LOW); //select
 #ifdef BIT_BANG_SPI
-    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, crtl_byte);
+    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, ctrl_byte);
     shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
     shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, value);
 #else
@@ -1048,8 +1108,13 @@ void mcp_write(bool spi, uint8_t dev_address, uint8_t reg_address, uint8_t value
 #endif
     digitalWrite(PE_CS_PIN, HIGH); //deselect
   } else { // i2c
-  //TODO: handle i2c mux here to unify address space
-    ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
+    if (dev_address <= 7){ // use the first port on the i2c mux for the first 8 expanders
+      tca9546_write(TCA9546_ADDRESS, false, false, false, true);
+      ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
+    } else { // use the second port on the i2c mux for the last two expanders
+      tca9546_write(TCA9546_ADDRESS, false, false, true, false);
+      ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | (dev_address-8);
+    }
     payload[0] = reg_address;
     payload[1] = value;
 
@@ -1063,6 +1128,7 @@ void mcp_write(bool spi, uint8_t dev_address, uint8_t reg_address, uint8_t value
       tries_left--;
       delayMicroseconds(5); // min bus free time for 100kHz comms mode
     }
+    tca9546_write(TCA9546_ADDRESS, false, false, false, false);
   }
 }
 
@@ -1141,51 +1207,212 @@ uint32_t mcp_setup(bool spi){
     mcp_write(spi, mcp_dev_addr, MCP_IODIRB_ADDR, mcp_reg_value);
 
     if (mcp_check(spi, mcp_dev_addr)) {
-      connected_devices_mask |= 0x01 << mcp_dev_addr;
+      connected_devices_mask |= (0x01 << mcp_dev_addr);
     }
   }
-  return (connected_devices);
+  return (connected_devices_mask);
 }
 
+// turns on a pixel at address pix
+// pix is an address string of form 1: BC or form 2: ABC
+// A is the substrate row on [1,4]
+// B is the substrage col on [a,h] (form 1) or [a,e] (form 2)
+// C is the pixel number to connect on [0,8] (form 1) or [0,6] (form 2), "0" being a special selection that disconnects the substrate
 int set_pix(String pix){
   bool spi = true;
   int error = NO_ERROR;
-  // places to keep mcp23X17 comms variables
-  uint8_t mcp_dev_addr, mcp_reg_value;
+  int switch_layout = NO_SWITCHES;
+  // places to keep mcp comms variables
+  uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
   uint8_t mcp_readback_value = 0x00;
-  
-  uint8_t substrate = pix.charAt(0) - 'a'; //convert a, b, c... to 0, 1, 2...
-  uint8_t pixel = pix.charAt(1) - '0';
-  if ((substrate >= 0) & (substrate <= 7)) {
-    //mcp23X17_all_off();
-    mcp_dev_addr = substrate;
-    if ((pixel >= 0) & (pixel <= 8)) {
-      if ((pixel == 8) | (pixel == 6) | (pixel == 7) | (pixel == 5)) {
-        mcp_reg_value = TOP; // top bus bar connection is closer to these pixels
-      } else if ((pixel == 4) | (pixel == 2) | (pixel == 3) | (pixel == 1)){
-        mcp_reg_value = BOT; // bottom bus bar connection is closer to the rest
-      } else { // turn off portA
-        mcp_reg_value = 0x00;
-      }
-      mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value); //enable TOP or BOT bus connection
-      mcp_readback_value = mcp_read(spi, mcp_dev_addr,MCP_OLATA_ADDR);
-      
-      if (mcp_readback_value != mcp_reg_value) {
-        error += ERR_SELECTION_A_DISAGREE;
-      }
+  int row = -1; // substrate row. optional given by user in number, optional, "1" is the first row)
+  int col = -1; // substrate col. required. given by user as a letter. "a" is the first col
+  int pixel = -1; // required. given by user as a number. "1" is the first pixel. "0" disconnects the substrate
+  int min_row = -1;
+  int max_row = -1;
+  int min_col = -1;
+  int max_col = -1;
+  int min_pix = -1;
+  int max_pix = -1;
 
-      if (pixel == 0) {
-        mcp_reg_value = 0x00;
-      } else {
-        mcp_reg_value = 0x01 << (pixel -1);
-      }
-      mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value); //enable pixel connection
-      mcp_readback_value = mcp_read(spi, mcp_dev_addr,MCP_OLATB_ADDR);
+  if (pix.length() == 2){
+    switch_layout = SNAITH_SWITCHES;
+  } else if (pix.length() == 3){
+    switch_layout = OTTER_SWITCHES;
+  }
 
-      if (mcp_readback_value != mcp_reg_value) {
-        error += ERR_SELECTION_B_DISAGREE;
+  switch (switch_layout){
+    case SNAITH_SWITCHES:
+      row = 0;
+      col = pix.charAt(0) - 'a'; //convert a, b, c... to 0, 1, 2...
+      pixel = pix.charAt(1) - '0'; //convert string "0", "1", "2", "3"... to int 0, 1, 2...
+      min_row = 0;
+      max_row = 0;
+      min_col = 0;
+      max_col = 7;
+      min_pix = 0;
+      max_pix = 8;
+      spi = true;
+      break;
+    case OTTER_SWITCHES:
+      row = pix.charAt(0) - '1'; //convert string "1", "2", "3"... to int 0, 1, 2...
+      col = pix.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+      pixel = pix.charAt(2) - '0'; //convert string "0", "1", "2", "3"... to int 0, 1, 2...
+      min_row = 0;
+      max_row = 3;
+      min_col = 0;
+      max_col = 4;
+      min_pix = 0;
+      max_pix = 6;
+      spi = false;
+      break;
+  /*
+  * 
+  *    =====otter substrate grid=====
+  *     --------------------------
+  *    |       o                  |
+  *    | E4   D4   C4   B4   A4   |
+  *    |                          |
+  *    | E3   D3   C3   B3   A3   |
+  *    |                          |   --> mux box connections
+  *    | E2   D2   C2   B2   A2   |   -->    this side
+  *    |                          |
+  *    | E1   D1   C1   B1   A1   |
+  *    |                          |
+  *     --------------------------
+  *  o = orientation hole
+  * 
+  *    =====otter substrate layout=====
+  *        ---------------------
+  *        | x x    x x    x x+|
+  *        |  3      2      1  |
+  *        |                   |
+  *        |x                 x|
+  *        | (J9)B        T(J8)|
+  *        |x                 x|
+  *        |                   |
+  *        |  6      5      4  |
+  *        |ox x    x x    x x |
+  *        ---------------------
+  * x      = pin contact location
+  * number = pixel numbering as marked on pin PCB
+  * B or T = connection to common terminal
+  * +      = the cross mark on the PCB
+  * o      = the circle mark on the PCB
+  * 
+  * pixels by switch bit:
+  * bit 0 --> pix 1
+  * bit 1 --> pix 4
+  * bit 2 --> pix 2
+  * bit 3 --> pix 5
+  * bit 4 --> pix 3
+  * bit 5 --> pix 6
+  * bit 6 --> 1 side common (T,J8)
+  * bit 7 --> 3 side common (B,J9) 
+  * 
+  * switch bit by pixel number
+  * 1 side common (T,J8) --> bit 6
+  * pix 1                --> bit 0
+  * pix 2                --> bit 2
+  * pix 3                --> bit 4
+  * pix 4                --> bit 1
+  * pix 5                --> bit 3
+  * pix 6                --> bit 5
+  * 3 side common (B,J9) --> bit 7
+  */
+    default:
+      error = ERR_BAD_SUBSTRATE;
+  }
+
+  if ((col >= min_col) & (col <= max_col) & (row >= min_row) & (row <= max_row)) {
+    //mcp_all_off();
+    if ((pixel >= min_pix) & (pixel <= max_pix)) {
+      switch (switch_layout){
+        case SNAITH_SWITCHES:
+          mcp_dev_addr = col;
+          if ((pixel == 8) | (pixel == 6) | (pixel == 7) | (pixel == 5)) {
+            mcp_reg_value = TOP; // top bus bar connection is closer to these pixels
+          } else if ((pixel == 4) | (pixel == 2) | (pixel == 3) | (pixel == 1)){
+            mcp_reg_value = BOT; // bottom bus bar connection is closer to the rest
+          } else { // turn off portA (pixel 0)
+            mcp_reg_value = 0x00;
+          }
+          mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value); //enable TOP or BOT bus connection
+          mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATA_ADDR);
+          
+          if (mcp_readback_value != mcp_reg_value) {
+            error += ERR_SELECTION_A_DISAGREE;
+          }
+
+          if (pixel == 0) {
+            mcp_reg_value = 0x00;
+          } else {
+            mcp_reg_value = 0x01 << (pixel -1);
+          }
+          mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value); //enable pixel connection
+          mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATB_ADDR);
+
+          if (mcp_readback_value != mcp_reg_value) {
+            error += ERR_SELECTION_B_DISAGREE;
+          }
+          break;
+        
+        case OTTER_SWITCHES:
+          mcp_dev_addr = col;
+          mcp_dev_addr <<= 1;
+
+          if ((row == 2) | (row == 3)){
+            mcp_dev_addr++;
+          }
+
+          if ((row == 0) | (row == 2)){
+            mcp_reg_addr = MCP_OLATA_ADDR;
+          } else if ((row == 1) | (row == 3)){
+            mcp_reg_addr = MCP_OLATB_ADDR;
+          }
+
+          // set the pixel lines
+          switch (pixel){
+            case 1:
+              mcp_reg_value = 0x01<<0;
+              break;
+            case 2:
+              mcp_reg_value = 0x01<<2;
+              break;
+            case 3:
+              mcp_reg_value = 0x01<<4;
+              break;
+            case 4:
+              mcp_reg_value = 0x01<<1;
+              break;
+            case 5:
+              mcp_reg_value = 0x01<<3;
+              break;
+            case 6:
+              mcp_reg_value = 0x01<<5;
+              break;
+          }
+
+          // work out which common pins we'll use (this will only matter with cut pcb jumpers on baseboards)
+          if ((pixel == 1) | (pixel == 2) | (pixel == 4)) {
+            mcp_reg_value |= 0x01<<6; // top bus bar connection is closer to these pixels
+          } else if ((pixel == 5) | (pixel == 6) | (pixel == 3)){
+            mcp_reg_value |= 0x01<<7; // bottom bus bar connection is closer to the rest
+          } else { // turn off portA (pixel 0)
+            mcp_reg_value = 0x00;
+          }
+
+          mcp_write(spi, mcp_dev_addr, mcp_reg_addr, mcp_reg_value); // do it.
+          mcp_readback_value = mcp_read(spi, mcp_dev_addr, mcp_reg_addr);
+
+          // check it's done
+          if (mcp_readback_value != mcp_reg_value) {
+            error += ERR_SELECTION_A_DISAGREE;
+          }
+          break;
+        default:
+          error = ERR_BAD_SUBSTRATE;
       }
-      
     } else { // pixel out of bounds
       error = ERR_BAD_PIX;
     }
