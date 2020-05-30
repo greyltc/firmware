@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 2
-#define VERSION_PATCH 1
+#define VERSION_PATCH 2
 #define BUILD 898b678
 // ====== start user editable config ======
 
@@ -33,6 +33,11 @@
 //#define NO_STAGE
 
 // ====== end user editable config ======
+#ifdef DEBUG
+#  define D(x) (x)
+#else
+#  define D(x) do{}while(0)
+#endif // DEBUG
 
 // FYI-- do something like this to enter the control interface:
 // telnet 10.42.0.54
@@ -253,7 +258,12 @@ const unsigned int LED2_PIN = 12; // arduino pin for LED2
 #endif
 
 const unsigned int ETHERNET_SPI_CS = 10; // arduino pin that's connected to the ethernet shield's W5500 CS line
+
+#ifdef USE_SD
+// file handle for streaming ADC data to SD card
+File fsd;
 const unsigned int SD_SPI_CS = 4; // arduino pin that's connected to the ethernet shield's SD card CS line
+#endif //USE_SD
 
 // define the command termination style we'll use
 //const char cmd_terminator[1] = { 0x0A }; // LF
@@ -301,11 +311,6 @@ EthernetServer server(serverPort);
 
 //FastCRC16 CRC16;
 
-#ifdef USE_SD
-// file handle for streaming ADC data to SD card
-File fsd;
-#endif //USE_SD
-
 // declare functions TODO: move to header file
 
 // utility functions
@@ -349,13 +354,13 @@ int32_t ads_get_data(bool);
 void easter_egg(void);
 
 void setup() {
-  #ifdef DEBUG
-  Serial.begin(115200); // serial port for debugging  
-  Serial.println(F("________Begin Setup Function________"));
-  #endif
+  D(Serial.begin(115200)); // serial port for debugging
+  D(Serial.println(F("________Begin Setup Function________")));
 
+#ifdef USE_SD
   digitalWrite(SD_SPI_CS, HIGH); //deselect
   pinMode(SD_SPI_CS, OUTPUT);
+#endif //USE_SD
   
   digitalWrite(HARDWARE_SPI_CS, HIGH); //deselect
   pinMode(HARDWARE_SPI_CS, OUTPUT);
@@ -363,7 +368,7 @@ void setup() {
   digitalWrite(PE_CS_PIN, HIGH); //deselect
   pinMode(PE_CS_PIN, OUTPUT); // get ready to chipselect
 
-  #ifdef BIT_BANG_SPI
+#ifdef BIT_BANG_SPI
   digitalWrite(PE_SCK_PIN, LOW); //clock starts low
   pinMode(PE_SCK_PIN, OUTPUT);
 
@@ -371,68 +376,53 @@ void setup() {
   pinMode(PE_MOSI_PIN, OUTPUT);
   
   pinMode(PE_MISO_PIN, INPUT);
-  #endif
+#endif // BIT_BANG_SPI
 
   Wire.begin(); // for I2C
   // the wire module now times out and resets itsself to prevent lockups
   Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
 
-  // ============= ethernet setup ============== 
-  #ifdef DEBUG
-  Serial.println(F("Getting IP via DHCP..."));
-  #endif
+  // ============= ethernet setup ==============
+  D(Serial.println(F("Getting IP via DHCP...")));
   
   //Ethernet.init(ETHERNET_SPI_CS); // only for non standard ethernet chipselects
   
-  #ifdef STATIC_IP
+#ifdef STATIC_IP
   Ethernet.begin(mac, ip);
-  #else
+#else
   Ethernet.begin(mac);
-  #endif
-  
-  #ifdef DEBUG
-  Serial.println(F("Done!"));
-  Serial.print(F("Ready for TCP (telnet) connections on "));
-  Serial.print(Ethernet.localIP());
-  Serial.print(F(":"));
-  Serial.println(serverPort);
-  #endif // DEBUG
+#endif
+
+  D(Serial.println(F("Done!")));
+  D(Serial.print(F("Ready for TCP (telnet) connections on ")));
+  D(Serial.print(Ethernet.localIP()));
+  D(Serial.print(F(":")));
+  D(Serial.println(serverPort));
 
   // ============= SD card setup ==============
-  #ifdef USE_SD
-  #ifdef DEBUG
-  Serial.print(F("Initializing SD card..."));
-  #endif // DEBUG
+#ifdef USE_SD
+  D(Serial.print(F("Initializing SD card...")));
 
   if (!SD.begin(SD_SPI_CS)) {
-    #ifdef DEBUG
-    Serial.println(F("SD initialization failed!"));
-    #endif // DEBUG
-    while (1); // chill here forever if SD card init failed
+    D(Serial.println(F("SD initialization failed!")));
+    delay(500);
+    reset();
   } else { // SD card init worked
-    #ifdef DEBUG
-    Serial.println(F("complete."));
-    #endif // DEBUG
+    D(Serial.println(F("complete.")));
 
     fsd = SD.open(F(STREAM_FILE), FILE_WRITE);
     if (fsd) {  // if the file opened okay, write to it
-      #ifdef DEBUG
-      Serial.print(F("Doing test write of 'testing 1, 2, 3.' to adcbytes.bin on SD card..."));
-      #endif // DEBUG
+      D(Serial.print(F("Doing test write of 'testing 1, 2, 3.' to adcbytes.bin on SD card...")));
       
       fsd.println(F("testing 1, 2, 3.")); // expecting 17 (or 18) bytes to be written here
 
-      #ifdef DEBUG
-      Serial.println(F("done."));
-      #endif // DEBUG
+      D(Serial.println(F("done.")));
       fsd.close(); // close the file
     } else {
-      #ifdef DEBUG
-      Serial.println(F("error opening "STREAM_FILE));  // if the file didn't open, print an error
-      #endif // DEBUG
+      D(Serial.println(F("error opening "STREAM_FILE)));  // if the file didn't open, print an error
     } // section for if the SD card file opened for writing properly
     
-    #ifdef DEBUG
+#ifdef DEBUG
     fsd = SD.open(F(STREAM_FILE), FILE_READ);
     if (fsd) {  // if the file opened okay, read it
       Serial.println(F("Doing test read from SD card..."));
@@ -453,46 +443,41 @@ void setup() {
     } else {
       Serial.println(F("error opening "STREAM_FILE));  // if the file didn't open, print an error
     } // section for if the SD card file opened for reading properly
-    #endif // DEBUG
+#endif // DEBUG
     SD.remove(F(STREAM_FILE)); // delete the testing file
   } // SD card setup
-  #endif // USE_SD
+#endif // USE_SD
   
-  #ifndef NO_LED
+#ifndef NO_LED
   pinMode(LED_PIN, OUTPUT); // to show we are working
   pinMode(LED2_PIN, OUTPUT);
-  #endif
+#endif
 
-  #ifndef NO_ADC
+#ifndef NO_ADC
   // ============= ADC setup ============== 
   delayMicroseconds(500); // wait to ensure the adc has finished powering up
-  #ifdef DEBUG
-  Serial.print(F("ADC init..."));
-  #endif // DEBUG
+  D(Serial.print(F("ADC init...")));
 
-  #ifdef ADS1015
+
+#ifdef ADS1015
   ads.begin();
-  #else
+#else
   ads_reset(true); // reset the current adc
   ads_reset(false); // reset the voltage adc
-  #endif
+#endif //ADS1015
 
-  #ifdef DEBUG
-  Serial.println(F("done."));
-  #endif // DEBUG
-  #endif //NO_ADC
 
-  #ifdef DEBUG
-  Serial.print(F("Probing for port expanders..."));
-  #endif // DEBUG
+  D(Serial.println(F("done.")));
+
+#endif //NO_ADC
+
+  D(Serial.print(F("Probing for port expanders...")));
 
   connected_devices = mcp_setup(MCP_SPI);
   // TODO: make use of connected_devices somehow
   
-  #ifdef DEBUG
-  Serial.println(F("done."));
-  Serial.println(F("________End Setup Function________"));
-  #endif
+  D(Serial.println(F("done.")));
+  D(Serial.println(F("________End Setup Function________")));
 }
 
 // define some various varibles we'll use in the loop
@@ -589,6 +574,7 @@ void loop() {
   } // end client disconnection check
 } // end main program loop
 
+// resets the microcontroller
 void reset(void) {
   asm volatile ("jmp 0");
 }
@@ -599,30 +585,30 @@ void command_handler(EthernetClient c, String cmd){
     NOP;
   } else if (cmd.equals("v")){ //version request command
     report_firmware_version(c);
-  } else if (cmd.startsWith("h") & (cmd.length() == 2)){ //home request command
+  } else if (cmd.startsWith("h") && (cmd.length() == 2)){ //home request command
     int ax = cmd.charAt(1) - '0';
-    if ((ax >= 0) & (ax <= 2)){
+    if ((ax >= 0) && (ax <= 2)){
         send_home(c, ax, HOMING_I2C_TIMEOUT_US);
     } else {
       ERR_MSG
     }
-  } else if (cmd.startsWith("l") & (cmd.length() == 2)){ //stage length request
+  } else if (cmd.startsWith("l") && (cmd.length() == 2)){ //stage length request
     int ax = cmd.charAt(1) - '0';
-    if ((ax >= 0) & (ax <= 2)){
+    if ((ax >= 0) && (ax <= 2)){
         get_len(c, ax);
     } else {
       ERR_MSG
     }
-  } else if (cmd.startsWith("r") & (cmd.length() == 2)){ //read back stage pos
+  } else if (cmd.startsWith("r") && (cmd.length() == 2)){ //read back stage pos
     int ax = cmd.charAt(1) - '0';
-    if ((ax >= 0) & (ax <= 2)){
+    if ((ax >= 0) && (ax <= 2)){
         get_pos(c, ax);
     } else {
       ERR_MSG
     }
-  } else if (cmd.startsWith("g") & (cmd.length() > 2)){ //send the stage somewhere
+  } else if (cmd.startsWith("g") && (cmd.length() > 2)){ //send the stage somewhere
     int ax = cmd.charAt(1) - '0';
-    if ((ax >= 0) & (ax <= 2)){
+    if ((ax >= 0) && (ax <= 2)){
         go_to(c, ax, cmd.substring(2).toInt());
     } else {
       ERR_MSG
@@ -637,44 +623,44 @@ void command_handler(EthernetClient c, String cmd){
     c.println(F("V"));
 #endif //NO_ADC
   } else if (cmd.equals("s")){ //pixel deselect command
-#ifdef SPI_MUX
+#ifdef I2C_MUX
     mcp_all_off(false);
 #else
     mcp_all_off(true);
 #endif
-  } else if (cmd.startsWith("s") & ((cmd.length() == 3) | (cmd.length() == 4))){ //pixel select command
+  } else if (cmd.startsWith("s") && ((cmd.length() == 3) || (cmd.length() == 4))){ //pixel select command
     pixSetErr = set_pix(cmd.substring(1));
     if (pixSetErr !=0){
       c.print(F("ERROR: Pixel selection error code "));
       c.println(pixSetErr);
     }
 #ifndef NO_ADC
-  } else if (cmd.startsWith("p") & (cmd.length() == 2)){ //photodiode measure command
+  } else if (cmd.startsWith("p") && (cmd.length() == 2)){ //photodiode measure command
     uint8_t pd = cmd.charAt(1) - '0';
-    if ((pd == 1) | (pd == 2)){
+    if ((pd == 1) || (pd == 2)){
         c.println(ads_get_single_ended(true,pd+1));
     } else {
       ERR_MSG
     }
 #endif // NO_ADC
-  } else if (cmd.startsWith("c")){ //mux check command
+  } else if (cmd.startsWith("c") && ((cmd.length() == 2) || (cmd.length() == 1))){ //mux check command
     if (cmd.length() == 2){
       uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
-      if ((substrate >= 0) & (substrate <= 9)){
+      if ((substrate >= 0) && (substrate <= 9)){
         if (!mcp_check(MCP_SPI, substrate)){
           c.println(F("MUX not found"));
         }
       } else {
         ERR_MSG
       }
-    } else if (cmd.length() == 1){
-      //connected_devices = mcp_setup(MCP_SPI);
-      c.println(mcp_setup(MCP_SPI));
+    } else if (cmd.length() == 1){ // "c" checks all the muxes
+      connected_devices = mcp_setup(MCP_SPI);
+      c.println(connected_devices);
     }
 #ifndef NO_ADC
-  } else if (cmd.startsWith("d") & (cmd.length() == 2)){ //pogo pin board sense divider measure command
+  } else if (cmd.startsWith("d") && (cmd.length() == 2)){ //pogo pin board sense divider measure command
     uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
-    if ((substrate >= 0) & (substrate <= 7)){
+    if ((substrate >= 0) && (substrate <= 7)){
       mcp_dev_addr = substrate;
 
       mcp_reg_value = mcp_read(true, mcp_dev_addr, MCP_OLATA_ADDR); // read OLATA
@@ -696,34 +682,34 @@ void command_handler(EthernetClient c, String cmd){
   } else if (cmd.startsWith("adc")){ // adc read command
     if (cmd.length() == 3){ //list all of the channels' counts
       for(int i=0; i<=7; i++){
-        if ((i >= 0) & (i <= 3)){
+        if ((i >= 0) && (i <= 3)){
           c.print(F("AIN"));
           c.print(i);
           c.print(F(" (U2, current adc, channel "));
           c.print(i);
           c.print(F(") = "));
-          c.print(ads_get_single_ended(true,i));
+          c.print(ads_get_single_ended(true, i));
           c.println(F(" counts"));
         }
-        if ((i >= 4) & (i <= 7)){
+        if ((i >= 4) && (i <= 7)){
           c.print(F("AIN"));
           c.print(i);
           c.print(F(" (U5, voltage adc, channel "));
           c.print(i-4);
           c.print(F(") = "));
-          c.print(ads_get_single_ended(false,i-4));
+          c.print(ads_get_single_ended(false, i-4));
           c.println(F(" counts"));
         }
       }
     } else if (cmd.length() == 4){
       int chan = cmd.charAt(3) - '0'; // 0-3 are mapped to U2's (current adc) chans AIN0-3, 4-7 are mapped to U5's (voltage adc) chans AIN0-3
-      if ((chan >= 0) & (chan <= 3)){  
+      if ((chan >= 0) && (chan <= 3)){  
         c.print(F("AIN"));
         c.print(chan);
         c.print(F("= "));
         c.print(ads_get_single_ended(true,chan));
         c.println(F(" counts"));
-      } else if ((chan >= 4) & (chan <= 7)) {
+      } else if ((chan >= 4) && (chan <= 7)) {
         c.print(F("AIN"));
         c.print(chan);
         c.print(F("= "));
@@ -736,7 +722,7 @@ void command_handler(EthernetClient c, String cmd){
       ERR_MSG
     }
 #ifndef ADS1015
-  } else if (cmd.startsWith(F("stream")) & (cmd.length() >= 7)){ //stream sample data from the ADC
+  } else if (cmd.startsWith(F("stream")) && (cmd.length() >= 7)){ //stream sample data from the ADC
     cmd.remove(0,6); // remove the word stream
     if (cmd.toInt() == 0){
       c.print(F("Streaming forever..."));
@@ -751,7 +737,7 @@ void command_handler(EthernetClient c, String cmd){
     }
 #endif //ADS1015
 #endif //NO_ADC
-  } else if (cmd.equals("?") | cmd.equals("help")){ //help request command
+  } else if (cmd.equals("?") || cmd.equals("help")){ //help request command
     c.println(F("__Supported Commands__"));
     for(int i=0; i<nCommands;i++){
       c.print(PGM2STR(help, 2*i));
@@ -760,11 +746,11 @@ void command_handler(EthernetClient c, String cmd){
     }
   } else if (cmd.equals(F("!gr"))){ 
     easter_egg();
-  } else if (cmd.equals(F("reset"))){
+  } else if (cmd.equals(F("reset")) || cmd.equals(F("reboot")) || cmd.equals(F("restart"))){
     c.stop();
     delay(100);
     reset();
-  } else if (cmd.equals(F("exit")) | cmd.equals(F("close")) | cmd.equals(F("disconnect")) | cmd.equals(F("quit")) | cmd.equals(F("logout"))){ //logout
+  } else if (cmd.equals(F("exit")) || cmd.equals(F("close")) || cmd.equals(F("disconnect")) || cmd.equals(F("quit")) || cmd.equals(F("logout"))){ //logout
     c.stop();
   } else { //bad command
     ERR_MSG
@@ -1010,16 +996,16 @@ void tca9546_write(uint8_t address, bool ch3, bool ch2, bool ch1, bool ch0) {
   int tries_left = 5; // number of retries left
 
   if (ch0){
-    control |= (0x01<<0);
+    control |= 0x01<<0;
   }
   if (ch1){
-    control |= (0x01<<1);
+    control |= 0x01<<1;
   }
   if (ch2){
-    control |= (0x01<<2);
+    control |= 0x01<<2;
   }
   if (ch3){
-    control |= (0x01<<3);
+    control |= 0x01<<3;
   }
 
   while (tries_left > 0){
@@ -1194,11 +1180,11 @@ uint32_t mcp_setup(bool spi){
       mcp_write(spi, mcp_dev_addr, MCP_IOCON_ADDR, mcp_reg_value);
     }
 
-    mcp_reg_value = 0x00; // PORTA out low
-    mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
+    //mcp_reg_value = 0x00; // PORTA out low
+    //mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
 
-    mcp_reg_value = 0x00; // PORTB out low
-    mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value);
+    //mcp_reg_value = 0x00; // PORTB out low
+    //mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value);
 
     mcp_reg_value = 0x00; //all of PORTA to are outputs
     mcp_write(spi, mcp_dev_addr, MCP_IODIRA_ADDR, mcp_reg_value);
@@ -1324,15 +1310,15 @@ int set_pix(String pix){
       error = ERR_BAD_SUBSTRATE;
   }
 
-  if ((col >= min_col) & (col <= max_col) & (row >= min_row) & (row <= max_row)) {
+  if ((col >= min_col) && (col <= max_col) && (row >= min_row) && (row <= max_row)) {
     //mcp_all_off();
-    if ((pixel >= min_pix) & (pixel <= max_pix)) {
+    if ((pixel >= min_pix) && (pixel <= max_pix)) {
       switch (switch_layout){
         case SNAITH_SWITCHES:
           mcp_dev_addr = col;
-          if ((pixel == 8) | (pixel == 6) | (pixel == 7) | (pixel == 5)) {
+          if ((pixel == 8) || (pixel == 6) || (pixel == 7) || (pixel == 5)) {
             mcp_reg_value = TOP; // top bus bar connection is closer to these pixels
-          } else if ((pixel == 4) | (pixel == 2) | (pixel == 3) | (pixel == 1)){
+          } else if ((pixel == 4) || (pixel == 2) || (pixel == 3) || (pixel == 1)){
             mcp_reg_value = BOT; // bottom bus bar connection is closer to the rest
           } else { // turn off portA (pixel 0)
             mcp_reg_value = 0x00;
@@ -1361,13 +1347,13 @@ int set_pix(String pix){
           mcp_dev_addr = col;
           mcp_dev_addr <<= 1;
 
-          if ((row == 2) | (row == 3)){
+          if ((row == 2) || (row == 3)){
             mcp_dev_addr++;
           }
 
-          if ((row == 0) | (row == 2)){
+          if ((row == 0) || (row == 2)){
             mcp_reg_addr = MCP_OLATA_ADDR;
-          } else if ((row == 1) | (row == 3)){
+          } else if ((row == 1) || (row == 3)){
             mcp_reg_addr = MCP_OLATB_ADDR;
           }
 
@@ -1394,9 +1380,9 @@ int set_pix(String pix){
           }
 
           // work out which common pins we'll use (this will only matter with cut pcb jumpers on baseboards)
-          if ((pixel == 1) | (pixel == 2) | (pixel == 4)) {
+          if ((pixel == 1) || (pixel == 2) || (pixel == 4)) {
             mcp_reg_value |= 0x01<<6; // top bus bar connection is closer to these pixels
-          } else if ((pixel == 5) | (pixel == 6) | (pixel == 3)){
+          } else if ((pixel == 5) || (pixel == 6) || (pixel == 3)){
             mcp_reg_value |= 0x01<<7; // bottom bus bar connection is closer to the rest
           } else { // turn off portA (pixel 0)
             mcp_reg_value = 0x00;
@@ -1450,7 +1436,7 @@ int ads_get_gain(bool current_adc){
 int32_t ads_get_single_ended(bool current_adc, int channel){
   int32_t reading = 0;
 
-  if ((channel >= 0) & (channel <= 3)){
+  if ((channel >= 0) && (channel <= 3)){
 #ifdef ADS1015
     reading = ads.readADC_SingleEnded(channel);
 #else
