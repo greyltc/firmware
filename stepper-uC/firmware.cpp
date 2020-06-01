@@ -5,6 +5,7 @@
 #define LED_PIN 3
 #endif
 
+#include <Arduino.h>
 #include <uStepperS.h>
 #include <Wire.h>
 
@@ -14,22 +15,29 @@ int wait_for_move(unsigned long timeout_ms = 1000);
 
 uStepperS stepper;
 const unsigned int aliveCycleT = 100; // [ms] main loop delay time
-int32_t req_pos = 0; // requested position in microsteps
-int32_t stage_length = 0; // this is zero when homing has not been done
-bool blocked = false; // set this when we don't want to accept new movement commands
-bool pending_cmd = false; // set this when the main loop should execute a command
+volatile int32_t stage_length = 0; // this is zero when homing has not been done, -1 while homing
+volatile bool blocked = false; // set this when we don't want to accept new movement commands
 volatile bool send_later = false; // the master has asked for bytes but we have none ready
 
 // response buffer for i2c responses to requests from the master
 #define RESP_BUF_LEN 20
-static uint8_t resp_buf[RESP_BUF_LEN] = { 'f' };
+static uint8_t out_buf[RESP_BUF_LEN] = { 'f' };
 volatile int bytes_ready = 0;
 
 // command buffer
 #define CMD_BUF_LEN 20
-static uint8_t cmd_buf[CMD_BUF_LEN] = { 0x00 };
+volatile uint8_t cmd_byte = 0x00;
+static uint8_t in_buf[CMD_BUF_LEN] = { 0x00 };
 
+// time to wait before starting the main loop
 #define MAIN_LOOP_DELAY 500
+
+void receiveEvent(int);
+bool requestEvent(void);
+int handle_cmd(bool);
+bool go_to (int32_t);
+int32_t home(void);
+bool is_stalled(uint32_t);
 
 void setup() {
 #ifdef DEBUG
@@ -55,26 +63,28 @@ void setup() {
   
   // setup I2C
   Wire.begin(I2C_SLAVE_ADDRESS);
-  Wire.setWireTimeoutUs(25000, true);
+  Wire.setWireTimeoutUs(25000ul, true);
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(requestEvent); // register event
 #ifdef DEBUG
   Serial.println("Setup complete.");
 #endif // DEBUG
+  // wait a bit before starting the main loop
   delay(MAIN_LOOP_DELAY);
 #ifdef DEBUG
   req_pos = 60000; // set bounce magnitude for testing
 #endif // DEBUG
+  digitalWrite(LED_PIN, LOW);
 }
 
 #ifndef NO_LED
 uint32_t led_loops = 5000ul;
 #endif // NO_LED
 
+// how many loops we've done
 uint32_t num_loops = 0ul;
 
-uint32_t tmp;
-char this_cmd;
+int rdy_to_send; // to store how many bytes are ready to send up to the master
 
 void loop() {
   num_loops++;
@@ -82,68 +92,24 @@ void loop() {
   //toggle the alive pin
   if (num_loops%led_loops == 0){
     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    //PIND = PIND | 0x01<<3; // fast LED on
   }
 #endif // NO_LED
 
   // handle a command
-  if (pending_cmd){ // there's a command to be processed
-    pending_cmd = false;
-    this_cmd = cmd_buf[0];
-    switch(this_cmd){
-      case 'g':  //goto
-        memcpy(&req_pos, &cmd_buf[1], 4); // copy in target
-        if (go_to(req_pos)){
-          resp_buf[0] = 'p';
-          bytes_ready = 1;
-         } else {
-          resp_buf[0] = 'f';
-          bytes_ready = 1;
-        }
-        break;
-      case 'h':
-        if (blocked == false){
-          home();
-          resp_buf[0] = 'p';
-          bytes_ready = 1;
-        } else {
-          resp_buf[0] = 'f';
-          bytes_ready = 1;
-        }
-        break;
-      case 'l': // get stage length
-        resp_buf[0] = 'p'; // press p for pass
-        resp_buf[1] = (stage_length >> 24) & 0xFF;
-        resp_buf[2] = (stage_length >> 16) & 0xFF;
-        resp_buf[3] = (stage_length >> 8) & 0xFF;
-        resp_buf[4] = stage_length & 0xFF;
-        bytes_ready = 5;
-       break;
-      case 'r': // read back position request
-        if (blocked){
-          resp_buf[0] = 'f';
-          bytes_ready = 1;
-        } else {
-          resp_buf[0] = 'p'; // press p for pass
-          tmp = stepper.driver.readRegister(XACTUAL); // TODO: one day think about sending the encoder position
-          resp_buf[1] = (tmp >> 24) & 0xFF;
-          resp_buf[2] = (tmp >> 16) & 0xFF;
-          resp_buf[3] = (tmp >> 8) & 0xFF;
-          resp_buf[4] = tmp & 0xFF;
-          bytes_ready = 5;
-        }
-        
-#ifdef DEBUG
-      default:
-        Serial.println("Got unknown command.");
-#endif // DEBUG
+  if (cmd_byte != 0x00){
+    // handle the command in slo mode (commands can take a long time to complete)
+    rdy_to_send = handle_cmd(true);
+    if (rdy_to_send > 0){
+      
+      while (!send_later){ // wait for the master to ask us for bytes
+        continue;
+      }
+      send_later = false;
+      
+      Wire.write((uint8_t*)out_buf, rdy_to_send);
+      Wire.flush();
     }
-  }
-  // the master asked us for bytes and we have some ready
-  if (send_later && (bytes_ready > 0)){
-    Wire.write((uint8_t*)resp_buf, bytes_ready);
-    Wire.flush();
-    send_later = false;
-    bytes_ready = 0;
   }
 
 #ifdef DEBUG // bouncy debug
@@ -166,6 +132,101 @@ void loop() {
     }
   }
 #endif // DEBUG
+}
+
+// processes commands from cmd_buf and cmd_byte
+// slo mode indicates that commands which requre "slow" processing should be handled
+// where "slow" is any processing that requires delays, external access or anything beyond simple variable lookups
+// slo_mode is true when called from the main loop and false when called from an ISR
+// places response bytes (if any) into out_buf and returns number of bytes it put there
+int handle_cmd(bool slo_mode){
+  int rdy_to_send = 0; // number of bytes ready to send
+  char this_cmd = cmd_byte;
+  int32_t pos = 0; // for storing position data
+  switch (this_cmd){
+    case 'g': // goto
+      if(blocked){
+        out_buf[0] = 'f';
+        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+        rdy_to_send = 1;
+      } else { //not blocked
+        if(slo_mode){ // processing in main loop, not ISR
+          memcpy(&pos, in_buf, sizeof(pos)); // copy in target pos
+          blocked = true; // block duiring go_to
+          if (go_to(pos)){
+            out_buf[0] = 'p';
+            cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+            rdy_to_send = 1;
+          } else {
+            out_buf[0] = 'f';
+            cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+            rdy_to_send = 1;
+          }
+          blocked = false;
+        }
+      }
+      break;
+
+    case 'h': // home command
+      if(blocked){
+        out_buf[0] = 'f';
+        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+        rdy_to_send = 1;
+      } else { //not blocked
+        if(slo_mode){  // processing in main loop, not ISR
+          cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+          blocked = true; // block duiring home
+          stage_length = home();
+          blocked = false;
+        } else { // processing in ISR, not main loop.
+          // accept the homing command, and respond immediately to the master
+          // but don't actually execute the homing procedure here
+          // instead we leave that to be done in the main loop later
+          stage_length = -1;
+          out_buf[0] = 'p';
+          rdy_to_send = 1;
+        }
+      }
+      break;
+
+    case 'l': // get stage length command
+      out_buf[0] = 'p'; // press p for pass
+      out_buf[1] = (stage_length >> 24) & 0xFF;
+      out_buf[2] = (stage_length >> 16) & 0xFF;
+      out_buf[3] = (stage_length >> 8) & 0xFF;
+      out_buf[4] = stage_length & 0xFF;
+      cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+      //_delay_us(10000); // for testing to check if we miss the master's request for bytes with this
+      rdy_to_send = 5;
+      break;
+    
+    case 'r': // read back position command
+      if(blocked){
+        out_buf[0] = 'f';
+        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+        rdy_to_send = 1;
+      } else { //not blocked
+        if(slo_mode){  // processing in main loop, not ISR
+          out_buf[0] = 'p'; // press p for pass
+          blocked = true; // block duiring postition register read
+          pos = stepper.driver.readRegister(XACTUAL); // TODO: one day think about sending the encoder position
+          blocked = false;
+          out_buf[1] = (pos >> 24) & 0xFF;
+          out_buf[2] = (pos >> 16) & 0xFF;
+          out_buf[3] = (pos >> 8) & 0xFF;
+          out_buf[4] = pos & 0xFF;
+          cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+          rdy_to_send = 5;
+        }
+      }
+      break;
+
+    default:
+      out_buf[0] = 'f'; // press f for fail
+      cmd_byte = 0x00; // clear the cmd_byte. it has been handled
+      rdy_to_send = 1;
+  } // end switch
+  return(rdy_to_send);
 }
 
 // waits for a move to complete and returns a reason for why it completed
@@ -309,7 +370,7 @@ bool check_stall(){
 // sends the stage somewhere
 bool go_to (int32_t pos) {
   // TODO: need to more aggressively limit travel to not go close to edges
-  if ( (pos > 0) && (pos <= stage_length) && !blocked && !check_stall()) {
+  if ( (pos > 0) && (pos <= stage_length) && !check_stall()) {
     stepper.driver.writeRegister(XTARGET, pos);
     return true;
   } else {
@@ -318,10 +379,8 @@ bool go_to (int32_t pos) {
 }
 
 // homing/stage length measurement task
-void home(){
-  int32_t tmp_stage_len = 0;
-  blocked = true; // block movement during homing
-  stage_length = -1;
+int32_t home(void){
+  int32_t measured_len = 0;
 
 #ifdef DEBUG
   Serial.println("Homing procedure initiated!");
@@ -357,7 +416,7 @@ void home(){
 #endif // DEBUG
   delay(500); // wait after hitting max stop
   
-  tmp_stage_len = stepper.driver.readRegister(XACTUAL);
+  measured_len = stepper.driver.readRegister(XACTUAL);
   //tmp_stage_len = stepper.driver.readRegister(X_ENC);
 #ifdef DEBUG
   Serial.print("The stage is ");
@@ -381,80 +440,37 @@ void home(){
   stepper.driver.writeRegister( VMAX_REG, stepper.driver.VMAX );
   stepper.driver.writeRegister( RAMPMODE, POSITIONING_MODE );
 
-  blocked = false;
-  stage_length = tmp_stage_len;
+  return (measured_len);
 }
 
-
-// function that executes whenever data is received from master
-// this function is registered as an event, see setup()
-// an ISR
-void receiveEvent(int howMany){
-  //Serial.println('rcv');
-  int i = 0; // bytes received, bad things will happend if this gets higher than cmd_buf_len
-  while(Wire.available() > 0 && i < CMD_BUF_LEN){ // loop through the bytes until there are no more
-    cmd_buf[i] = Wire.read(); // put the char into the command buffer
-    i++;
+// fires off whenever the master sends us bytes
+// is called from an ISR in the Wire library
+void receiveEvent(int how_many){
+  int i;
+  if (how_many > 0){
+    cmd_byte = Wire.read();
   }
-  pending_cmd = true;
+  for (i=1; (i<how_many) && (i<CMD_BUF_LEN); i++){
+    in_buf[i-1] = Wire.read();
+  }
+
+  // attempt to handle the command right in the ISR
+  bytes_ready = handle_cmd(false);
 }
 
-
-// fires when the master asks for bytes
-// an ISR
+// fires off whenever when the master asks for bytes
+// is called from an ISR in the Wire library
 bool requestEvent(void){
-   send_later = false;
-   if (bytes_ready > 0){
-     Wire.write((uint8_t*)resp_buf, bytes_ready);
-     bytes_ready = 0;
-   } else {
-     send_later = true;
-   }
-  //send_later = true;
-
-  // //Serial.println('req');
-  // uint32_t tmp = 0;
-  // bool send_later = false;
-  // switch(cmd_buf[0]){
-  //   case 'h':  //home
-  //    if (blocked){
-  //      Wire.write('f'); // press f for fail
-  //      send_later = false;
-  //    } else {
-  //      send_later = true;
-  //    }
-  //    break;
-  //   case 'g':  //goto
-  //     memcpy(&req_pos, &cmd_buf[1], 4); // copy in target
-  //     if (go_to(req_pos)){
-  //       Wire.write('p'); //press P for pass
-  //     } else {
-  //       Wire.write('f'); //press F for fail
-  //     }
-  //     break;
-  //   case 'l': // get stage length
-  //     resp_buf[0] = 'p'; // press p for pass
-  //     resp_buf[1] = (stage_length >> 24) & 0xFF;
-  //     resp_buf[2] = (stage_length >> 16) & 0xFF;
-  //     resp_buf[3] = (stage_length >> 8) & 0xFF;
-  //     resp_buf[4] = stage_length & 0xFF;
-  //     Wire.write((uint8_t*)resp_buf, 5);
-  //     break;
-  //   case 'r': // read back position request
-  //     if (blocked){
-  //       Wire.write('f'); // press f for fail
-  //     } else {
-  //       resp_buf[0] = 'p'; // press p for pass
-  //       tmp = stepper.driver.readRegister(XACTUAL); // TODO: one day think about sending the encoder position
-  //       resp_buf[1] = (tmp >> 24) & 0xFF;
-  //       resp_buf[2] = (tmp >> 16) & 0xFF;
-  //       resp_buf[3] = (tmp >> 8) & 0xFF;
-  //       resp_buf[4] = tmp & 0xFF;
-  //       Wire.write((uint8_t*)resp_buf, 5);
-  //     }
-  //     break;
-  //   default:
-  //     Wire.write('f'); //press F for fail
-  // }
+  send_later = false;
+  if (bytes_ready > 0){ // if we have something to send, send it right away
+    //send_later = false;
+    Wire.write((uint8_t*)out_buf, bytes_ready);
+    bytes_ready = 0;
+  } else { // no bytes ready
+    // we've been unable to respond to the master from the ISR
+    // we'll have to do it later, in the main loop
+    send_later = true; // this will trigger clock stretching
+    // which will be ended by the call to Wire.flush() from the main loop
+  }
   return(send_later);
 }

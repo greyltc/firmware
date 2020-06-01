@@ -17,7 +17,7 @@ pio lib -d pio-main install 872  # Arduino's Ethernet library
 
 mkdir -p pio-stepper
 platformio init --board ATmega328PB -d pio-stepper
-(cd pio-stepper/src && ln -sf ../../../ArduinoCore-avr/libraries/Wire/src/* .) # for my wire library mods)
+(cd pio-stepper/src && ln -sf ../../../ArduinoCore-avr/libraries/Wire/src/* .) # currently needed until my my wire library mods are merged
 (cd pio-stepper/src && ln -sf ../../stepper-uC/* .)
 ```
 

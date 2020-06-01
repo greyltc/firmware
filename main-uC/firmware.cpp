@@ -7,6 +7,9 @@
 // when I2C_MUX is defined, we control the pixel selection multiplexer via I2C a la Otter
 #define I2C_MUX
 
+// when NO_RELAY_SHIELD is defined, the relay shield control code is disabled
+//#define NO_RELAY_SHIELD
+
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
 //#define BIT_BANG_SPI
@@ -177,7 +180,7 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #define ADS122C04_INTERNAL_REF 2.048
 #define ADS122C04_CONVERSION_TIME 51 // in ms, for the defaults: normal mode, ~20 samples/sec. has 0.99ms headroom. actual time is 51192 normal mode clock cycles (1.024 MHz)
 #define ADS122C04_CONVERSION_TIME_TURBO 506 // in microseconds, for the fastest possible continuous sample rate: turbo mode, ~2k samples/sec. actual time is 1036 turbo mode clock cycles (2.048 MHz). has 0.140625 microseconds headroom
-#endif
+#endif //ADS1015
 #endif //NO_ADC
 
 //some definitions for the MCP23S17/MCP23017 (SPI/I2C)
@@ -251,19 +254,30 @@ union Lb{
 #define BOT 0x02
 #define V_D_EN 0x04
 
+#ifndef NO_RELAY_SHIELD
+//const unsigned int RELAY1_PIN = 4; // relay 1 control pin (hardware mod, was 4, but 4 conflicts with ethernet)
+const unsigned int RELAY2_PIN = 7; // relay 2 control pin
+const unsigned int RELAY3_PIN = 8; // relay 3 control pin
+const unsigned int RELAY4_PIN = 12; // relay 4 control pin
+#endif // NO_RELAY_SHIELD
+
 const unsigned int HARDWARE_SPI_CS = 53; // arduino pin that goes (in hardware) with the SPI bus (must be set output)
 #ifndef NO_LED
 const unsigned int LED_PIN = 13; // arduino pin for alive LED
-const unsigned int LED2_PIN = 12; // arduino pin for LED2
-#endif
+//const unsigned int LED2_PIN = 12; // arduino pin for LED2
+#endif // NO_LED
 
-const unsigned int ETHERNET_SPI_CS = 10; // arduino pin that's connected to the ethernet shield's W5500 CS line
+//const unsigned int ETHERNET_SPI_CS = 10; // arduino pin that's connected to the ethernet shield's W5500 CS line
 
 #ifdef USE_SD
 // file handle for streaming ADC data to SD card
 File fsd;
-const unsigned int SD_SPI_CS = 4; // arduino pin that's connected to the ethernet shield's SD card CS line
 #endif //USE_SD
+
+// arduino pin that's connected to the ethernet shield's SD card CS line
+// this will need to be deselected (HIGH) even if the SD card is not installed
+// or used to prevent messeing up ethernet comms
+const unsigned int SD_SPI_CS = 4; 
 
 // define the command termination style we'll use
 //const char cmd_terminator[1] = { 0x0A }; // LF
@@ -304,7 +318,6 @@ bool MCP_SPI = true;
 // I2C timeouts
 //#define I2C_TIMEOUT_US 10000000ul; //10s
 #define I2C_TIMEOUT_US 25000ul //25ms
-#define HOMING_I2C_TIMEOUT_US 100000000ul //100s
 
 // setup telnet server
 EthernetServer server(serverPort);
@@ -322,7 +335,7 @@ void command_handler(EthernetClient, String);
 void reset(void);
 
 // stage functions
-void send_home(EthernetClient, int, uint32_t);
+void send_home(EthernetClient, int);
 void get_len(EthernetClient, int);
 void get_pos(EthernetClient, int);
 void go_to(EthernetClient, int, int32_t);
@@ -357,10 +370,21 @@ void setup() {
   D(Serial.begin(115200)); // serial port for debugging
   D(Serial.println(F("________Begin Setup Function________")));
 
-#ifdef USE_SD
+
   digitalWrite(SD_SPI_CS, HIGH); //deselect
   pinMode(SD_SPI_CS, OUTPUT);
-#endif //USE_SD
+
+
+#ifndef NO_RELAY_SHIELD
+  //digitalWrite(RELAY1_PIN, LOW); //open
+  //pinMode(RELAY1_PIN, OUTPUT);
+  digitalWrite(RELAY2_PIN, LOW); //open
+  pinMode(RELAY2_PIN, OUTPUT);
+  digitalWrite(RELAY3_PIN, LOW); //open
+  pinMode(RELAY3_PIN, OUTPUT);
+  digitalWrite(RELAY3_PIN, LOW); //open
+  pinMode(RELAY4_PIN, OUTPUT);
+#endif
   
   digitalWrite(HARDWARE_SPI_CS, HIGH); //deselect
   pinMode(HARDWARE_SPI_CS, OUTPUT);
@@ -450,7 +474,7 @@ void setup() {
   
 #ifndef NO_LED
   pinMode(LED_PIN, OUTPUT); // to show we are working
-  pinMode(LED2_PIN, OUTPUT);
+  //pinMode(LED2_PIN, OUTPUT);
 #endif
 
 #ifndef NO_ADC
@@ -588,7 +612,7 @@ void command_handler(EthernetClient c, String cmd){
   } else if (cmd.startsWith("h") && (cmd.length() == 2)){ //home request command
     int ax = cmd.charAt(1) - '0';
     if ((ax >= 0) && (ax <= 2)){
-        send_home(c, ax, HOMING_I2C_TIMEOUT_US);
+        send_home(c, ax);
     } else {
       ERR_MSG
     }
@@ -758,6 +782,7 @@ void command_handler(EthernetClient c, String cmd){
 }
 
 void easter_egg(void){
+/*   
   bool spi = false;
   uint32_t expanders = 0x00000000;
 
@@ -789,7 +814,11 @@ void easter_egg(void){
     delay(500);
     mcp_write(spi, 0x00, MCP_OLATA_ADDR, 0x00);
   //}
+ */
 
+  digitalWrite(RELAY2_PIN, !digitalRead(RELAY2_PIN));
+  digitalWrite(RELAY3_PIN, !digitalRead(RELAY3_PIN));
+  digitalWrite(RELAY4_PIN, !digitalRead(RELAY4_PIN));
   // close some relays
   //mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(6) | bit(7)));
 
@@ -817,7 +846,7 @@ void report_firmware_version(EthernetClient c){
 }
 
 // sends home command to an axis
-void send_home(EthernetClient c, int axis, uint32_t timeout){
+void send_home(EthernetClient c, int axis){
   char result = 'f';
   int addr;
   int bytes_to_read;
@@ -827,9 +856,7 @@ void send_home(EthernetClient c, int axis, uint32_t timeout){
     Wire.beginTransmission(addr);
     if (Wire.write('h') == 1){  // sends instruction byte
       if (Wire.endTransmission(false) == 0){
-        Wire.setWireTimeoutUs(timeout, true);
         bytes_to_read = Wire.requestFrom(addr, 1, true);
-        Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
         if(bytes_to_read == 1){
           result =  Wire.read();
         }
@@ -870,8 +897,8 @@ void get_len(EthernetClient c, int axis){
   }
 
   if (result != 'p') {
-      c.print(F("ERROR "));
-      c.println(int(result));
+    c.print(F("ERROR "));
+    c.println(int(result));
   } else {
     c.println(length);
   }
