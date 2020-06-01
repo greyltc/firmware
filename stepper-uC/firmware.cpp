@@ -9,7 +9,8 @@
 #include <uStepperS.h>
 #include <Wire.h>
 
-#define I2C_SLAVE_ADDRESS 0x04
+// axis:address --> 1:0x50, 2:0x51, 3:0x52
+#define I2C_SLAVE_ADDRESS 0x52
 
 int wait_for_move(unsigned long timeout_ms = 1000);
 
@@ -165,6 +166,17 @@ int handle_cmd(bool slo_mode){
           blocked = false;
         }
       }
+      break;
+
+    case 'c': //comms check command
+      out_buf[0] = 'p'; // press p for pass
+      out_buf[1] = 0xCA;
+      out_buf[2] = 0XFE;
+      out_buf[3] = 0XBA;
+      out_buf[4] = 0XBE;
+      cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+      //_delay_us(10000); // for testing to check if we miss the master's request for bytes with this
+      rdy_to_send = 5;
       break;
 
     case 'h': // home command

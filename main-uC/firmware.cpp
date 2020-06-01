@@ -35,6 +35,11 @@
 // disable comms to the stage
 //#define NO_STAGE
 
+// mac address to use for ethernet connection
+#define OTTER_MAC { 0XA8, 0x61, 0x0A, 0xAE, 0x52, 0x60 }
+#define SNAITH_MAC { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 }
+const unsigned char this_mac[6] = OTTER_MAC;
+
 // ====== end user editable config ======
 #ifdef DEBUG
 #  define D(x) (x)
@@ -81,11 +86,14 @@ const char help_s_b[] PROGMEM = "\"sXY[Z]\", selects pixel Y on substrate X if n
 const char help_c_a[] PROGMEM = "c";
 const char help_c_b[] PROGMEM = "\"cX\", checks that MUX X is connected. just \"c\" returns a bitmask of connected port expanders";
 
+const char help_e_a[] PROGMEM = "e";
+const char help_e_b[] PROGMEM = "\"eX\", checks that stage X is connected. just \"e\" returns a bitmask of connected stage controllers";
+
 const char help_h_a[] PROGMEM = "h";
-const char help_h_b[] PROGMEM = "\"hX\", homes axis X, just \"h\" homes all axes";
+const char help_h_b[] PROGMEM = "\"hX\", homes axis X, just \"h\" homes all connected axes";
 
 const char help_l_a[] PROGMEM = "l";
-const char help_l_b[] PROGMEM = "\"lX\", returns the length in steps of axis X (0 means un-homed)";
+const char help_l_b[] PROGMEM = "\"lX\", returns the length in steps of axis X (0 means un-homed, -1 means currenlty homing)";
 
 const char help_g_a[] PROGMEM = "g";
 const char help_g_b[] PROGMEM = "\"gX[position]\", sends axis X to posion (given in integer steps)";
@@ -125,6 +133,7 @@ const char* const help[] PROGMEM  = {
   help_v_a, help_v_b,
   help_s_a, help_s_b,
   help_c_a, help_c_b,
+  help_e_a, help_e_b,
   help_h_a, help_h_b,
   help_l_a, help_l_b,
   help_g_a, help_g_b,
@@ -199,7 +208,7 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #define TCA9546_ADDRESS 0x70
 
 // stage controller I2C addresses
-const char AXIS_ADDR[3] = {0x04, 0x05, 0x06};
+const char AXIS_ADDR[3] = {0x50, 0x51, 0x52};
 
 // otter relay addresses (the actual I2C addresses used are 0x40 | this value)
 //const char OMUX_ADDR[10] = {0x00, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
@@ -297,13 +306,16 @@ const unsigned int PE_CS_PIN = 48; // arduino pin for expanders chip select pin
 const unsigned int serverPort = 23; // telnet port
 
 // the media access control (ethernet hardware) address for the shield:
-byte mac[] = { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 };
+
 #ifdef STATIC_IP
 const byte ip[] = STATIC_IP;  
 #endif
 
 // bitmask for which port expander chips were discovered
 uint32_t connected_devices = 0x00000000;
+
+// bitmask for which stages were discovered
+uint8_t connected_stages = 0x00;
 
 #ifndef BIT_BANG_SPI
 SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
@@ -335,13 +347,14 @@ void command_handler(EthernetClient, String);
 void reset(void);
 
 // stage functions
-void send_home(EthernetClient, int);
-void get_len(EthernetClient, int);
-void get_pos(EthernetClient, int);
-void go_to(EthernetClient, int, int32_t);
+char stage_send_home(int);
+void stage_get_len(EthernetClient, int);
+void stage_get_pos(EthernetClient, int);
+void stage_go_to(EthernetClient, int, int32_t);
+uint8_t get_stages(void);
+bool stage_comms_check(int);
 
 // port expander functions
-
 void tca9546_write(uint8_t, bool, bool, bool, bool);
 uint8_t tca9546_read(uint8_t);
 uint32_t mcp_setup(bool);
@@ -412,9 +425,9 @@ void setup() {
   //Ethernet.init(ETHERNET_SPI_CS); // only for non standard ethernet chipselects
   
 #ifdef STATIC_IP
-  Ethernet.begin(mac, ip);
+  Ethernet.begin((unsigned char*)this_mac, ip);
 #else
-  Ethernet.begin(mac);
+  Ethernet.begin((unsigned char*)this_mac);
 #endif
 
   D(Serial.println(F("Done!")));
@@ -498,7 +511,7 @@ void setup() {
   D(Serial.print(F("Probing for port expanders...")));
 
   connected_devices = mcp_setup(MCP_SPI);
-  // TODO: make use of connected_devices somehow
+  connected_stages = get_stages();
   
   D(Serial.println(F("done.")));
   D(Serial.println(F("________End Setup Function________")));
@@ -550,8 +563,16 @@ void loop() {
       if (!clients[i]) {
         new_client.print(F("You are Client Number "));
         new_client.print(i);
-        new_client.print(F(". I am Firmware Version: "));
+        new_client.println('.');
+        new_client.print(F("I am Firmware Version: "));
         report_firmware_version(new_client);
+        new_client.print(F("I have Stage bitmask = "));
+        new_client.print(connected_stages);
+        new_client.println(',');
+        new_client.print(F("and MUX bitmask = "));
+        new_client.print(connected_devices);
+        new_client.println('.');
+        //new_client.println(F("Enter ? for help."));
 
         delay(10);  // connection garbage collection time
         //new_client.flush();  // throw away any startup garbage bytes
@@ -609,31 +630,39 @@ void command_handler(EthernetClient c, String cmd){
     NOP;
   } else if (cmd.equals("v")){ //version request command
     report_firmware_version(c);
+  } else if (cmd.equals("h")){ // home all stages
+    for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
+      stage_send_home(i);
+    }
   } else if (cmd.startsWith("h") && (cmd.length() == 2)){ //home request command
-    int ax = cmd.charAt(1) - '0';
+    int ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
-        send_home(c, ax);
+      char result = stage_send_home(ax);
+      if (result != 'p') {
+        c.print(F("ERROR "));
+        c.println(int(result));
+      }
     } else {
       ERR_MSG
     }
   } else if (cmd.startsWith("l") && (cmd.length() == 2)){ //stage length request
-    int ax = cmd.charAt(1) - '0';
+    int ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
-        get_len(c, ax);
+        stage_get_len(c, ax);
     } else {
       ERR_MSG
     }
   } else if (cmd.startsWith("r") && (cmd.length() == 2)){ //read back stage pos
-    int ax = cmd.charAt(1) - '0';
+    int ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
-        get_pos(c, ax);
+        stage_get_pos(c, ax);
     } else {
       ERR_MSG
     }
   } else if (cmd.startsWith("g") && (cmd.length() > 2)){ //send the stage somewhere
-    int ax = cmd.charAt(1) - '0';
+    int ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
-        go_to(c, ax, cmd.substring(2).toInt());
+        stage_go_to(c, ax, cmd.substring(2).toInt());
     } else {
       ERR_MSG
     }
@@ -667,19 +696,29 @@ void command_handler(EthernetClient c, String cmd){
       ERR_MSG
     }
 #endif // NO_ADC
-  } else if (cmd.startsWith("c") && ((cmd.length() == 2) || (cmd.length() == 1))){ //mux check command
-    if (cmd.length() == 2){
-      uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
-      if ((substrate >= 0) && (substrate <= 9)){
-        if (!mcp_check(MCP_SPI, substrate)){
-          c.println(F("MUX not found"));
-        }
-      } else {
-        ERR_MSG
+  } else if (cmd.equals("e")) {
+    connected_stages = get_stages();
+    c.println(connected_stages);
+  } else if (cmd.startsWith("e") && ((cmd.length() == 2))){ //stage check command
+    uint8_t stage = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
+    if ((stage >= 0) && (stage <= 2)){
+      if (!stage_comms_check(stage)){
+        c.println(F("stage not found"));
       }
-    } else if (cmd.length() == 1){ // "c" checks all the muxes
-      connected_devices = mcp_setup(MCP_SPI);
-      c.println(connected_devices);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.equals("c")){
+    connected_devices = mcp_setup(MCP_SPI);
+    c.println(connected_devices);
+  } else if (cmd.startsWith("c") && ((cmd.length() == 2))){ //mux check command
+    uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+    if ((substrate >= 0) && (substrate <= 9)){
+      if (!mcp_check(MCP_SPI, substrate)){
+        c.println(F("MUX not found"));
+      }
+    } else {
+      ERR_MSG
     }
 #ifndef NO_ADC
   } else if (cmd.startsWith("d") && (cmd.length() == 2)){ //pogo pin board sense divider measure command
@@ -845,8 +884,52 @@ void report_firmware_version(EthernetClient c){
   c.println(FIRMWARE_VER);
 }
 
+// returns bitmask of connected stages
+uint8_t get_stages(void){
+  uint8_t stages = 0x00;
+  unsigned int i;
+  for (i=0; i<sizeof(AXIS_ADDR); i++){
+    if (stage_comms_check(i)){
+      stages |= (0x01<<i);
+    }
+  }
+  return(stages);
+}
+
+// checks that a specific stage is connected
+bool stage_comms_check(int axis){
+  bool pass = false;
+  int addr;
+  int bytes_to_read;
+  uint8_t expected[5] = {'p', 0xca, 0xfe, 0xba, 0xbe};
+  uint8_t got[5] = {0x00};
+
+  if (axis >= 0 && axis <= 2){
+    addr = AXIS_ADDR[axis];
+    Wire.beginTransmission(addr);
+    if (Wire.write('c') == 1){  // sends instruction byte
+      if (Wire.endTransmission(false) == 0){
+        bytes_to_read = Wire.requestFrom(addr, 5, true);
+        if(bytes_to_read == 5){
+          got[0] = Wire.read();
+          got[1] = Wire.read();
+          got[2] = Wire.read();
+          got[3] = Wire.read();
+          got[4] = Wire.read();
+        }
+      }
+    }
+  }
+
+  if(0 == memcmp(expected, got, sizeof(got))){
+    pass = true;
+  }
+
+  return (pass);
+}
+
 // sends home command to an axis
-void send_home(EthernetClient c, int axis){
+char stage_send_home(int axis){
   char result = 'f';
   int addr;
   int bytes_to_read;
@@ -863,15 +946,11 @@ void send_home(EthernetClient c, int axis){
       }
     }
   }
-
-  if (result != 'p') {
-      c.print(F("ERROR "));
-      c.println(int(result));
-  }
+  return(result);
 }
 
 // gets the length of an axis
-void get_len(EthernetClient c, int axis){
+void stage_get_len(EthernetClient c, int axis){
   char result = 'f';
   int addr;
   int bytes_to_read;
@@ -884,6 +963,7 @@ void get_len(EthernetClient c, int axis){
         bytes_to_read = Wire.requestFrom(addr, 5, true);
         if(bytes_to_read == 5){
           result =  Wire.read();
+          // TODO: see if i can use memcpy on both ends for this...
           length =  Wire.read();
           length =  length << 8;
           length |=  Wire.read();
@@ -905,7 +985,7 @@ void get_len(EthernetClient c, int axis){
 }
 
 // reads back the stage position
-void get_pos(EthernetClient c, int axis){
+void stage_get_pos(EthernetClient c, int axis){
   char result = 'f';
   int addr;
   int bytes_to_read;
@@ -918,6 +998,7 @@ void get_pos(EthernetClient c, int axis){
         bytes_to_read = Wire.requestFrom(addr, 5, true);
         if(bytes_to_read == 5){
           result =  Wire.read();
+          // TODO: see if i can use memcpy on both ends for this...
           pos =  Wire.read();
           pos =  pos << 8;
           pos |=  Wire.read();
@@ -939,7 +1020,7 @@ void get_pos(EthernetClient c, int axis){
 }
 
 // sends the stage somewhere
-void go_to(EthernetClient c, int axis, int32_t position){
+void stage_go_to(EthernetClient c, int axis, int32_t position){
   char result = 'f';
   int addr;
   int bytes_to_read;
