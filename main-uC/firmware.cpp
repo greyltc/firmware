@@ -2,6 +2,10 @@
 #define VERSION_MINOR 2
 #define VERSION_PATCH 5
 #define BUILD e7fe2a6
+// TODO: add motor driver disable command
+// TODO: add motor driver enable command
+// TODO: add eqe enable command
+// TODO: add eqe disable command
 // ====== start user editable config ======
 
 // when I2C_MUX is defined, we control the pixel selection multiplexer via I2C a la Otter
@@ -429,6 +433,7 @@ void setup() {
 #else
   Ethernet.begin((unsigned char*)this_mac);
 #endif
+  // NOTE: SPI.begin is needed but not called explicitly here because it's called in Ethernet.begin
 
   D(Serial.println(F("Done!")));
   D(Serial.print(F("Ready for TCP (telnet) connections on ")));
