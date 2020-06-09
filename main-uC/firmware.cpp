@@ -105,6 +105,15 @@ const char help_g_b[] PROGMEM = "\"gX[position]\", sends axis X to posion (given
 const char help_r_a[] PROGMEM = "r";
 const char help_r_b[] PROGMEM = "\"rX\", reads out the position of axis X (in steps)";
 
+const char help_b_a[] PROGMEM = "b";
+const char help_b_b[] PROGMEM = "\"bX\", powers off the motor driver for axis X, just \"b\" powers off all connected motor drivers";
+
+const char help_f_a[] PROGMEM = "f";
+const char help_f_b[] PROGMEM = "\"fX\", puts axis X in freewheeling mode, just \"f\" does so for all connected axes";
+
+const char help_i_a[] PROGMEM = "i";
+const char help_i_b[] PROGMEM = "\"iX\", gets the status byte for axis X, just \"i\" does so for all connected axes";
+
 #ifndef NO_ADC
 const char help_adc_a[] PROGMEM = "adc";
 const char help_adc_b[] PROGMEM = "\"adcX\" returns count of channel X (can be [0,7]), just \"adc\" returns counts of all channels";
@@ -142,6 +151,9 @@ const char* const help[] PROGMEM  = {
   help_l_a, help_l_b,
   help_g_a, help_g_b,
   help_r_a, help_r_b,
+  help_b_a, help_b_b,
+  help_f_a, help_f_b,
+  help_i_a, help_i_b,
 #ifndef NO_ADC
   help_adc_a, help_adc_b,
   help_d_a, help_d_b,
@@ -316,10 +328,10 @@ const byte ip[] = STATIC_IP;
 #endif
 
 // bitmask for which port expander chips were discovered
-uint32_t connected_devices = 0x00000000;
+static uint32_t connected_devices = 0x00000000;
 
 // bitmask for which stages were discovered
-uint8_t connected_stages = 0x00;
+static uint8_t connected_stages = 0x00;
 
 #ifndef BIT_BANG_SPI
 SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
@@ -355,6 +367,9 @@ char stage_send_home(int);
 void stage_get_len(EthernetClient, int);
 void stage_get_pos(EthernetClient, int);
 void stage_go_to(EthernetClient, int, int32_t);
+void stage_status(EthernetClient, int);
+char stage_freewheel(int);
+char stage_powerdown(int);
 uint8_t get_stages(void);
 bool stage_comms_check(int);
 
@@ -701,7 +716,7 @@ void command_handler(EthernetClient c, String cmd){
       ERR_MSG
     }
 #endif // NO_ADC
-  } else if (cmd.equals("e")) {
+  } else if (cmd.equals("e")) { // get stage connected mask command
     connected_stages = get_stages();
     c.println(connected_stages);
   } else if (cmd.startsWith("e") && ((cmd.length() == 2))){ //stage check command
@@ -709,6 +724,47 @@ void command_handler(EthernetClient c, String cmd){
     if ((stage >= 0) && (stage <= 2)){
       if (!stage_comms_check(stage)){
         c.println(F("stage not found"));
+      }
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.equals("b")) { //power off all stages
+    for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
+      stage_powerdown(i);
+    }
+  } else if (cmd.startsWith("b") && ((cmd.length() == 2))){ //power off a single stage
+    uint8_t stage = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
+    if ((stage >= 0) && (stage <= 2)){
+      char result = stage_powerdown(stage);
+      if (result != 'p') {
+        c.print(F("ERROR "));
+        c.println(int(result));
+      }
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.equals("i")) { //stage status byte command
+    for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
+      stage_status(c,i);
+    }
+  } else if (cmd.startsWith("i") && ((cmd.length() == 2))){ //stage status byte command
+    uint8_t stage = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
+    if ((stage >= 0) && (stage <= 2)){
+      stage_status(c, stage);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.equals("f")) { //freewheel all stages
+    for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
+      stage_freewheel(i);
+    }
+  } else if (cmd.startsWith("f") && ((cmd.length() == 2))){ //freewheel a single stage
+    uint8_t stage = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
+    if ((stage >= 0) && (stage <= 2)){
+      char result = stage_freewheel(stage);
+      if (result != 'p') {
+        c.print(F("ERROR "));
+        c.println(int(result));
       }
     } else {
       ERR_MSG
@@ -954,6 +1010,48 @@ char stage_send_home(int axis){
   return(result);
 }
 
+// sends powerdown command to an axis
+char stage_powerdown(int axis){
+  char result = 'f';
+  int addr;
+  int bytes_to_read;
+
+  if (axis >= 0 && axis <= 2){
+    addr = AXIS_ADDR[axis];
+    Wire.beginTransmission(addr);
+    if (Wire.write('d') == 1){  // sends instruction byte
+      if (Wire.endTransmission(false) == 0){
+        bytes_to_read = Wire.requestFrom(addr, 1, true);
+        if(bytes_to_read == 1){
+          result =  Wire.read();
+        }
+      }
+    }
+  }
+  return(result);
+}
+
+// sends freewheel command to an axis
+char stage_freewheel(int axis){
+  char result = 'f';
+  int addr;
+  int bytes_to_read;
+
+  if (axis >= 0 && axis <= 2){
+    addr = AXIS_ADDR[axis];
+    Wire.beginTransmission(addr);
+    if (Wire.write('f') == 1){  // sends instruction byte
+      if (Wire.endTransmission(false) == 0){
+        bytes_to_read = Wire.requestFrom(addr, 1, true);
+        if(bytes_to_read == 1){
+          result =  Wire.read();
+        }
+      }
+    }
+  }
+  return(result);
+}
+
 // gets the length of an axis
 void stage_get_len(EthernetClient c, int axis){
   char result = 'f';
@@ -1048,6 +1146,34 @@ void stage_go_to(EthernetClient c, int axis, int32_t position){
   if (result != 'p') {
       c.print(F("ERROR "));
       c.println(int(result));
+  }
+}
+
+// gets stage status byte
+void stage_status(EthernetClient c, int axis){
+  char result = 'f';
+  int addr;
+  int bytes_to_read;
+  uint8_t status = 0;
+  if (axis >= 0 && axis <= 2){
+    addr = AXIS_ADDR[axis];
+    Wire.beginTransmission(addr);
+    if (Wire.write('s') == 1){  // sends instruction byte
+      if (Wire.endTransmission(false) == 0){
+        bytes_to_read = Wire.requestFrom(addr, 2, true);
+        if(bytes_to_read == 2){
+          result = Wire.read();
+          status = Wire.read();
+        }
+      }
+    }
+  }
+
+  if (result != 'p') {
+    c.print(F("ERROR "));
+    c.println(int(result));
+  } else {
+    c.println(status, BIN);
   }
 }
 

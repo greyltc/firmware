@@ -3,7 +3,7 @@
 #define VERSION_PATCH 2
 #define BUILD e7fe2a6
 
-#define DEBUG
+//#define DEBUG
 //#define NO_LED
 
 // maximum velocity in microsteps/s
@@ -25,7 +25,7 @@
 // 0 --> least difficult to stall
 // 64 --> default value
 // 127 --> most difficult to stall
-#define STALL 70
+#define STALL 62
 
 // axis:address --> 1:0x50, 2:0x51, 3:0x52
 #define I2C_SLAVE_ADDRESS 0x52
@@ -141,7 +141,7 @@ uint8_t TMC5130 = 0;
 // because some of them are read only and they have mupliple fields
 // we'll keep track of them ourselves here
 uint32_t COOLCONF_shadow_reg = 0;
-uint32_t PWMCONF_shadow_reg = 0;
+uint32_t PWMCONF_shadow_reg = 0x00050480;
 uint32_t IHOLD_IRUN_shadow_reg = 0;
 
 void setup() {
@@ -185,16 +185,16 @@ void setup() {
   tmc5130_writeInt(TMC5130, TMC5130_ENCMODE, 0);
   tmc5130_writeInt(TMC5130, TMC5130_ENC_CONST, (int32_t)-26214399);
 
-  TMC5130_FIELD_WRITE(TMC5130, TMC5130_GCONF, TMC5130_EN_PWM_MODE_MASK, TMC5130_EN_PWM_MODE_SHIFT, 0);
+  TMC5130_FIELD_WRITE(TMC5130, TMC5130_GCONF, TMC5130_EN_PWM_MODE_MASK, TMC5130_EN_PWM_MODE_SHIFT, 1);
   TMC5130_FIELD_WRITE(TMC5130, TMC5130_GCONF, TMC5130_I_SCALE_ANALOG_MASK, TMC5130_I_SCALE_ANALOG_SHIFT, 1);
   TMC5130_FIELD_WRITE(TMC5130, TMC5130_GCONF, TMC5130_ENC_COMMUTATION_MASK, TMC5130_ENC_COMMUTATION_SHIFT, 0);
 
   PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_PWM_AMPL_MASK, TMC5130_PWM_AMPL_SHIFT, 128);
-  PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_PWM_GRAD_MASK, TMC5130_PWM_GRAD_SHIFT, 1);
-  PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_PWM_FREQ_MASK, TMC5130_PWM_FREQ_SHIFT, 0);
+  //PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_PWM_GRAD_MASK, TMC5130_PWM_GRAD_SHIFT, 1);
+  //PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_PWM_FREQ_MASK, TMC5130_PWM_FREQ_SHIFT, 0);
   PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_PWM_AUTOSCALE_MASK, TMC5130_PWM_AUTOSCALE_SHIFT, 1);
-  PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_FREEWHEEL_MASK, TMC5130_FREEWHEEL_SHIFT, 1);
-  tmc5130_writeInt(TMC5130, TMC5130_PWMCONF, PWMCONF_shadow_reg); // write the shadow register
+  //PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_FREEWHEEL_MASK, TMC5130_FREEWHEEL_SHIFT, 1);
+  //tmc5130_writeInt(TMC5130, TMC5130_PWMCONF, PWMCONF_shadow_reg); // write the shadow register
 
   tmc5130_writeInt(TMC5130, TMC5130_TPWMTHRS, 5000);
 
@@ -214,9 +214,10 @@ void setup() {
   // set up transition to something
   // higher numbers make stall detection less reliable
   // lower numbers mean stalling will only be turned on with faster movement
-  tmc5130_writeInt(TMC5130, TMC5130_TCOOLTHRS, 250); // was 1000
+  tmc5130_writeInt(TMC5130, TMC5130_TCOOLTHRS, 300); // was 1000
 
 	COOLCONF_shadow_reg = FIELD_SET(COOLCONF_shadow_reg, TMC5130_SGT_MASK, TMC5130_SGT_SHIFT, rescale_sgt(STALL));
+  COOLCONF_shadow_reg = FIELD_SET(COOLCONF_shadow_reg, TMC5130_SEMIN_MASK, TMC5130_SEMIN_SHIFT, 2);
   tmc5130_writeInt(TMC5130, TMC5130_COOLCONF, COOLCONF_shadow_reg);
 
   // set current position to zero, then set target to where we are now
@@ -227,7 +228,7 @@ void setup() {
   IHOLD_IRUN_shadow_reg = FIELD_SET(IHOLD_IRUN_shadow_reg, TMC5130_IRUN_MASK, TMC5130_IRUN_SHIFT, RUN_CURRENT); // set run current [0,32]
   IHOLD_IRUN_shadow_reg = FIELD_SET(IHOLD_IRUN_shadow_reg, TMC5130_IHOLD_MASK, TMC5130_IHOLD_SHIFT, HOLD_CURRENT); // set hold/idle current [0,32]
   // set rampdown time from run to hold current [0,15], 4 might give 1 second
-  IHOLD_IRUN_shadow_reg = FIELD_SET(IHOLD_IRUN_shadow_reg, TMC5130_IHOLDDELAY_MASK, TMC5130_IHOLDDELAY_SHIFT, 1);
+  IHOLD_IRUN_shadow_reg = FIELD_SET(IHOLD_IRUN_shadow_reg, TMC5130_IHOLDDELAY_MASK, TMC5130_IHOLDDELAY_SHIFT, 4);
   tmc5130_writeInt(TMC5130, TMC5130_IHOLD_IRUN, IHOLD_IRUN_shadow_reg); // write shadow reg
   
   // reset encoder position to zero
@@ -242,6 +243,9 @@ void setup() {
   tmc5130_readInt(TMC5130, TMC5130_GSTAT);
   tmc5130_readInt(TMC5130, TMC5130_RAMPSTAT);
   tmc5130_readInt(TMC5130, TMC5130_ENC_STATUS);
+
+  // boot into freewheel mode
+  freewheel(true);
 
 #ifndef NO_LED
   // setupLED pin
@@ -269,6 +273,8 @@ uint32_t num_loops = 0ul;
 
 int rdy_to_send; // to store how many bytes are ready to send up to the master
 
+int32_t time0;
+bool timesup = false;
 void loop() {
   num_loops++;
 #ifndef NO_LED
@@ -283,15 +289,21 @@ void loop() {
   if (cmd_byte != 0x00){
     // handle the command in slo mode (commands can take a long time to complete)
     rdy_to_send = handle_cmd(true);
+    timesup = false;
     if (rdy_to_send > 0){
-      
+      time0 = millis();
       while (!send_later){ // wait for the master to ask us for bytes
         NOP;
+        if((millis() - time0) > 500){
+          timesup = true;
+          break;
+        }
       }
       send_later = false;
-      
-      Wire.write((uint8_t*)out_buf, rdy_to_send);
-      Wire.flush();
+      if (!timesup){
+        Wire.write((uint8_t*)out_buf, rdy_to_send);
+        Wire.flush();
+      }
     }
   }
 
@@ -495,6 +507,8 @@ int handle_cmd(bool slo_mode){
       if(blocked){
         out_buf[0] = 'p';
         out_buf[1] = status; //just send the last status we're aware of. if we're blocked it's probably being updated frequently
+        //D(Serial.println(status, BIN));
+        //D(Serial.println(tmc5130_readInt(TMC5130, TMC5130_DRVSTATUS), BIN));
         cmd_byte = 0x00; // clear the cmd _byte. it has been handled
         rdy_to_send = 2;
       } else { //not blocked
@@ -590,13 +604,16 @@ bool go_to (int32_t target) {
   // TODO: need to more aggressively limit travel to not go close to edges
   if ( (target > 0) && (target <= stage_length)) {
     tmc5130_writeInt(TMC5130, TMC5130_XTARGET, target);
-    if (!(status & BIT2)){
+
+    // this is the stall check
+    // the action of reading this field will clear a few bits in the register that maybe we don't care about
+    //if (status & BIT2){
+    //if (TMC5130_FIELD_READ(TMC5130, TMC5130_RAMPSTAT, TMC5130_STATUS_SG_MASK, TMC5130_STATUS_SG_SHIFT)){
+    if (TMC5130_FIELD_READ(TMC5130, TMC5130_RAMPSTAT, TMC5130_EVENT_STOP_SG_MASK, TMC5130_EVENT_STOP_SG_SHIFT)){
+      freewheel(true); // we're done
+    } else {
       return_code = true;
     }
-    D(Serial.println(status));
-    //delay(150);
-    //D(Serial.println(status));
-
   }
   return (return_code);
 }
@@ -640,12 +657,9 @@ int32_t home(void){
   
   move_result = wait_for_move();
   if (move_result != 0){ // wait for the target position to be reached
-    D(Serial.println(move_result));
-    delay(500);
-    tmc5130_readInt(TMC5130, TMC5130_DRVSTATUS); // force update of the status byte
-    D(Serial.println(status));
     return (0); // homing has failed because we were unable to complete the backoff procedure
   }
+  clear_stall();
 
   D(Serial.println("Homing completed."));
   return (measured_len);
