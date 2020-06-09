@@ -28,7 +28,7 @@
 #define STALL 64
 
 // axis:address --> 1:0x50, 2:0x51, 3:0x52
-#define I2C_SLAVE_ADDRESS 0x52
+#define I2C_SLAVE_ADDRESS 0x50
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -193,8 +193,8 @@ void setup() {
   //PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_PWM_GRAD_MASK, TMC5130_PWM_GRAD_SHIFT, 1);
   //PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_PWM_FREQ_MASK, TMC5130_PWM_FREQ_SHIFT, 0);
   PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_PWM_AUTOSCALE_MASK, TMC5130_PWM_AUTOSCALE_SHIFT, 1);
-  //PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_FREEWHEEL_MASK, TMC5130_FREEWHEEL_SHIFT, 1);
-  //tmc5130_writeInt(TMC5130, TMC5130_PWMCONF, PWMCONF_shadow_reg); // write the shadow register
+  PWMCONF_shadow_reg = FIELD_SET(PWMCONF_shadow_reg, TMC5130_FREEWHEEL_MASK, TMC5130_FREEWHEEL_SHIFT, 1);
+  tmc5130_writeInt(TMC5130, TMC5130_PWMCONF, PWMCONF_shadow_reg); // write the shadow register
 
   tmc5130_writeInt(TMC5130, TMC5130_TPWMTHRS, 5000);
 
@@ -245,6 +245,7 @@ void setup() {
   tmc5130_readInt(TMC5130, TMC5130_ENC_STATUS);
 
   // boot into freewheel mode
+  //estop(true); 
   freewheel(true);
 
 #ifndef NO_LED
