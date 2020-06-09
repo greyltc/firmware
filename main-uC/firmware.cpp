@@ -114,6 +114,12 @@ const char help_f_b[] PROGMEM = "\"fX\", puts axis X in freewheeling mode, just 
 const char help_i_a[] PROGMEM = "i";
 const char help_i_b[] PROGMEM = "\"iX\", gets the status byte for axis X, just \"i\" does so for all connected axes";
 
+const char help_eqe_a[] PROGMEM = "eqe";
+const char help_eqe_b[] PROGMEM = "switches relays to connect lockin";
+
+const char help_iv_a[] PROGMEM = "iv";
+const char help_iv_b[] PROGMEM = "switches relays to connect sourcemeter";
+
 #ifndef NO_ADC
 const char help_adc_a[] PROGMEM = "adc";
 const char help_adc_b[] PROGMEM = "\"adcX\" returns count of channel X (can be [0,7]), just \"adc\" returns counts of all channels";
@@ -154,6 +160,8 @@ const char* const help[] PROGMEM  = {
   help_b_a, help_b_b,
   help_f_a, help_f_b,
   help_i_a, help_i_b,
+  help_eqe_a, help_eqe_b,
+  help_iv_a, help_iv_b,
 #ifndef NO_ADC
   help_adc_a, help_adc_b,
   help_d_a, help_d_b,
@@ -654,6 +662,12 @@ void command_handler(EthernetClient c, String cmd){
     for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
       stage_send_home(i);
     }
+  } else if (cmd.equals("iv")){ //switch relays to sourcemeter
+    digitalWrite(RELAY3_PIN, LOW);
+    digitalWrite(RELAY4_PIN, LOW);
+  } else if (cmd.equals("eqe")){ //switch relays to lock-in
+    digitalWrite(RELAY3_PIN, HIGH);
+    digitalWrite(RELAY4_PIN, HIGH);
   } else if (cmd.startsWith("h") && (cmd.length() == 2)){ //home request command
     int ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
@@ -916,9 +930,7 @@ void easter_egg(void){
   //}
  */
 
-  digitalWrite(RELAY2_PIN, !digitalRead(RELAY2_PIN));
-  digitalWrite(RELAY3_PIN, !digitalRead(RELAY3_PIN));
-  digitalWrite(RELAY4_PIN, !digitalRead(RELAY4_PIN));
+  //digitalWrite(RELAY2_PIN, !digitalRead(RELAY2_PIN));
   // close some relays
   //mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(6) | bit(7)));
 

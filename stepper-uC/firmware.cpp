@@ -25,7 +25,7 @@
 // 0 --> least difficult to stall
 // 64 --> default value
 // 127 --> most difficult to stall
-#define STALL 62
+#define STALL 64
 
 // axis:address --> 1:0x50, 2:0x51, 3:0x52
 #define I2C_SLAVE_ADDRESS 0x52
