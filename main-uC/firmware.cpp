@@ -1,7 +1,7 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
 #define VERSION_PATCH 0
-#define BUILD e7fe2a6
+#define BUILD a843d30
 // ====== start user editable config ======
 
 // when I2C_MUX is defined, we control the pixel selection multiplexer via I2C a la Otter
