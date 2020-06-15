@@ -1,11 +1,7 @@
-#define VERSION_MAJOR 0
-#define VERSION_MINOR 2
-#define VERSION_PATCH 5
+#define VERSION_MAJOR 1
+#define VERSION_MINOR 0
+#define VERSION_PATCH 0
 #define BUILD e7fe2a6
-// TODO: add motor driver disable command
-// TODO: add motor driver enable command
-// TODO: add eqe enable command
-// TODO: add eqe disable command
 // ====== start user editable config ======
 
 // when I2C_MUX is defined, we control the pixel selection multiplexer via I2C a la Otter
@@ -1599,7 +1595,7 @@ int set_pix(String pix){
           mcp_dev_addr <<= 1;
 
           if ((row == 2) || (row == 3)){
-            mcp_dev_addr++;
+            mcp_dev_addr++; // these rows are connected to the second expander on the NCD switch boards
           }
 
           if ((row == 0) || (row == 2)){

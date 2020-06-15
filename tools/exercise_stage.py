@@ -7,14 +7,20 @@ import time
 import itertools
 import sys
 import random
+import serial
 
 PROMPT = b'>>> '  # the firmware's prompt
 EOL = b'\r\n'  # client-->server transmission line ending the firmware expects
-
+#default_host = "WIZnet111785.lan"
+default_host = "10.46.0.233"
 
 parser = argparse.ArgumentParser(description=f'Does stuff with the sage')
-parser.add_argument('-s', '--server-hostname', type=str, default="WIZnet111785.lan",
+parser.add_argument('-s', '--server-hostname', type=str, default=default_host,
                     help='hostname or IP address of server to connect to')
+parser.add_argument('-c', '--sourcemeter-comport', type=str, default="/dev/ttyUSB0",
+                    help='Serial port for sourcemeter (57600 baud, term=<CR+LF>, flow control=on)')
+parser.add_argument('-w', '--switch', action="store_true",
+                    help='round-robin switch all switches')
 parser.add_argument('-o', '--home', action="store_true",
                     help='homes the stage')
 parser.add_argument('-b', '--bounce', action="store_true",
@@ -23,7 +29,6 @@ parser.add_argument('-a', '--axis', type=int, default=0,
                     help='axis to operate on')
 parser.add_argument('-g', '--goto', type=int,
                     help='sends the stage somewhere')
-
 
 args = parser.parse_args()
 
@@ -165,6 +170,47 @@ with MyTelnet(args.server_hostname) as tn:
                     raise(ValueError("Error moving stage"))
             else:
                 print(f"Bounced@{target}!")
+
+    if args.switch == True:
+        delay = 1
+        rows = '1234'
+        #rows = '1'
+        cols = 'abcde'
+        #cols = 'a'
+        pixs = '123456'
+        tn.send_cmd('c') # check what expanders we see
+        expander_bitmask = tn.read_response(timeout=0.5)
+        print(f"port expander bitmask = {expander_bitmask}")
+        if expander_bitmask != '1023':
+            raise(ValueError("Can't see all the port expanders"))
+        tn.send_cmd('s') # deselect all
+        tn.read_response(timeout=0.5)
+        with serial.Serial(args.sourcemeter_comport, 57600, xonxoff=1) as ser:
+
+            while True:
+                for r in rows:
+                    for c in cols:
+                        for p in pixs:
+                            cmd = f's{r}{c}{p}'
+                            #print(cmd)
+                            tn.send_cmd(cmd) # select pixel
+                            tn.read_response(timeout=0.5)
+                            # time.sleep(delay)
+                            # sourcemeter needs to be all set up manually for this to work
+                            # so maybe: measure ohms. output on.
+                            # or: source current. measure voltage. output on.
+                            ser.write('read?\r'.encode())
+                            m = ser.readline() # expects '\n' (<LF> termination)
+                            m = m.split(','.encode())
+                            v = float(m[0])
+                            i = float(m[1])
+                            o = float(m[2])
+                            print(f'{cmd}: {v} V, {i} A, {o} ohm')
+                            tn.send_cmd('s') # deselect all
+                            tn.read_response(timeout=0.5)
+                        #time.sleep(delay)
+                        print()
+
 
     if args.home == True:
         home_result = home(tn, args.axis)
