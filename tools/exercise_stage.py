@@ -105,7 +105,7 @@ def goto(tn, axis, position, timeout = 20):
 def home(tn, axis, timeout = 80):
     ret_val = -2
     print('HOMING!')
-    tn.send_cmd('h0')
+    tn.send_cmd(f'h{axis}')
     response = tn.read_response(timeout=timeout) # wait for homing to complete
 
     if response != '':
@@ -114,7 +114,7 @@ def home(tn, axis, timeout = 80):
         if tn.empty_response == True: # we never got the prompt back
             ret_val = -2
         else:
-            tn.send_cmd('l0')
+            tn.send_cmd(f'l{axis}')
             ret_val = int(tn.read_response())
     return(ret_val)
 
