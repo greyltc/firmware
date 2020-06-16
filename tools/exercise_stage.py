@@ -25,7 +25,7 @@ parser.add_argument('-o', '--home', action="store_true",
                     help='homes the stage')
 parser.add_argument('-b', '--bounce', action="store_true",
                     help='homes the stage then bounces it between 10 and 90 percent forever')
-parser.add_argument('-a', '--axis', type=int, default=0,
+parser.add_argument('-a', '--axis', type=int, default=1,
                     help='axis to operate on')
 parser.add_argument('-g', '--goto', type=int,
                     help='sends the stage somewhere')
