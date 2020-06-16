@@ -11,10 +11,11 @@ import serial
 
 PROMPT = b'>>> '  # the firmware's prompt
 EOL = b'\r\n'  # client-->server transmission line ending the firmware expects
+
 #default_host = "WIZnet111785.lan"
 default_host = "10.46.0.233"
 
-parser = argparse.ArgumentParser(description=f'Does stuff with the sage')
+parser = argparse.ArgumentParser(description=f'Firmware comms & system testing')
 parser.add_argument('-s', '--server-hostname', type=str, default=default_host,
                     help='hostname or IP address of server to connect to')
 parser.add_argument('-c', '--sourcemeter-comport', type=str, default="/dev/ttyUSB0",
