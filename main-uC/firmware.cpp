@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
-#define VERSION_PATCH 0
+#define VERSION_PATCH 1
 #define BUILD a843d30
 // ====== start user editable config ======
 
@@ -30,7 +30,7 @@
 //#define ADS1015
 
 // disable the ADC altogether
-//#define NO_ADC
+#define NO_ADC
 
 // disable comms to the stage
 //#define NO_STAGE
@@ -92,6 +92,9 @@ const char help_e_b[] PROGMEM = "\"eX\", checks that stage X is connected. just 
 const char help_h_a[] PROGMEM = "h";
 const char help_h_b[] PROGMEM = "\"hX\", homes axis X, just \"h\" homes all connected axes";
 
+const char help_j_a[] PROGMEM = "j";
+const char help_j_b[] PROGMEM = "\"jXY\", jogs axis X, in direction Y where can be \"a\" or \"b\"";
+
 const char help_l_a[] PROGMEM = "l";
 const char help_l_b[] PROGMEM = "\"lX\", returns the length in steps of axis X (0 means un-homed, -1 means currenlty homing)";
 
@@ -150,6 +153,7 @@ const char* const help[] PROGMEM  = {
   help_c_a, help_c_b,
   help_e_a, help_e_b,
   help_h_a, help_h_b,
+  help_j_a, help_j_b,
   help_l_a, help_l_b,
   help_g_a, help_g_b,
   help_r_a, help_r_b,
@@ -376,6 +380,7 @@ char stage_freewheel(int);
 char stage_powerdown(int);
 uint8_t get_stages(void);
 bool stage_comms_check(int);
+char stage_jog(int, char);
 
 // port expander functions
 void tca9546_write(uint8_t, bool, bool, bool, bool);
@@ -686,6 +691,18 @@ void command_handler(EthernetClient c, String cmd){
     int ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
         stage_get_pos(c, ax);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.startsWith("j") && (cmd.length() == 3)){ //jog command
+    int ax = cmd.charAt(1) - '1';
+    char dir = cmd.charAt(2);
+    if ((ax >= 0) && (ax <= 2)){
+      char result = stage_jog(ax, dir);
+      if (result != 'p') {
+        c.print(F("ERROR "));
+        c.println(int(result));
+      }
     } else {
       ERR_MSG
     }
@@ -1011,6 +1028,29 @@ char stage_send_home(int axis){
         bytes_to_read = Wire.requestFrom(addr, 1, true);
         if(bytes_to_read == 1){
           result =  Wire.read();
+        }
+      }
+    }
+  }
+  return(result);
+}
+
+// jogs stage in a direction
+char stage_jog(int axis, char dir){
+  char result = 'f';
+  int addr;
+  int bytes_to_read;
+
+  if ((dir == 'a') || (dir == 'b')){
+    if ((axis >= 0) && (axis <= 2)){
+      addr = AXIS_ADDR[axis];
+      Wire.beginTransmission(addr);
+      if (Wire.write(dir) == 1){  // sends instruction byte (either a or b)
+        if (Wire.endTransmission(false) == 0){
+          bytes_to_read = Wire.requestFrom(addr, 1, true);
+          if(bytes_to_read == 1){
+            result =  Wire.read();
+          }
         }
       }
     }

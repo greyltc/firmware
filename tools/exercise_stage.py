@@ -105,8 +105,8 @@ def goto(tn, axis, position, timeout = 20):
 def home(tn, axis, timeout = 80):
     ret_val = -2
     print('HOMING!')
-    tn.send_cmd('h0')
-    response = tn.read_response(timeout=timeout) # wait for homing to complete
+    tn.send_cmd(f'h{axis}')
+    response = tn.read_response(timeout) # get home response
 
     if response != '':
         raise(ValueError(f"Homing the stage failed: {response}"))
@@ -114,8 +114,58 @@ def home(tn, axis, timeout = 80):
         if tn.empty_response == True: # we never got the prompt back
             ret_val = -2
         else:
-            tn.send_cmd('l0')
-            ret_val = int(tn.read_response())
+            t0 = time.time()
+            dt = 0
+            while(dt<timeout):
+                time.sleep(0.1)
+                tn.send_cmd(f'l{axis}')
+                ret_val = int(tn.read_response())
+                dt = time.time() - t0
+
+    return(ret_val)
+
+# otter homes the system
+# returns:
+# -1 if the homing timed out
+# -2 if there was a programming error
+# -3 stall or timeout during safe move
+# the stage dims in (x, y) steps
+def otterhome(tn, timeout = 250):
+    ret_val = -2
+    print('HOMING!')
+    tn.send_cmd(f'j2b')
+    response = tn.read_response(timeout) # get home response
+
+    if response != '':
+        raise(ValueError(f"Homing the stage failed: {response}"))
+    else:
+        if tn.empty_response == True: # we never got the prompt back
+            ret_val = -2
+        else:
+            t0 = time.time()
+            dt = 0
+            while(dt<timeout):
+                time.sleep(0.1)
+                tn.send_cmd(f'l2')
+                ret_val = int(tn.read_response())
+                dt = time.time() - t0
+                if (ret_val == 0):
+                    break
+            if (ret_val == 0):
+                ret_val = home(tn,1)
+                if (ret_val > 0):
+                    xval = ret_val
+                    ret_val = goto(tn, 1, 100000, timeout = 80) # sends x to otter safe location
+                    if (ret_val == 0):
+                        ret_val = home(tn,2)
+                        if (ret_val > 0):
+                            yval = ret_val
+                            ret_val = [xval,yval]
+                    else: # bad goto
+                        if (ret_val == -1) or (ret_val == -2):
+                            ret_val = -3
+                        else:
+                            ret_val = -2 
     return(ret_val)
 
 

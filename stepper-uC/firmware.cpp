@@ -1,6 +1,6 @@
-#define VERSION_MAJOR 0
-#define VERSION_MINOR 3
-#define VERSION_PATCH 2
+#define VERSION_MAJOR 1
+#define VERSION_MINOR 0
+#define VERSION_PATCH 1
 #define BUILD e7fe2a6
 
 //#define DEBUG
@@ -28,7 +28,7 @@
 #define STALL 64
 
 // axis:address --> 1:0x50, 2:0x51, 3:0x52
-#define I2C_SLAVE_ADDRESS 0x50
+#define I2C_SLAVE_ADDRESS 0x51
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -50,6 +50,7 @@ extern "C" {
 
 #define BIT_SET(VALUE, BIT_POSITION) ((VALUE) |= (1<<(BIT_POSITION)))
 #define BIT_CLEAR(VALUE, BIT_POSITION) ((VALUE) &= ~(1<<(BIT_POSITION)))
+#define BIT_GET(VALUE, BIT_POSITION) (((VALUE) & ( 1 << (BIT_POSITION) )) >> (BIT_POSITION))
 
 #define PIN_MODE(PIN_NAME, IO_MODE) (PIN_MODE_ ## IO_MODE(PIN_NAME ## _DDR, PIN_NAME ## _BIT))
 #define PIN_MODE_OUTPUT(DDR, BIT_POSITION) BIT_SET(DDR, BIT_POSITION)
@@ -103,6 +104,7 @@ bool requestEvent(void);
 int handle_cmd(bool);
 bool go_to (int32_t);
 int32_t home(void);
+void jog(int);
 void spi_setup(void);
 void tmc5130_readWriteArray(uint8_t , uint8_t *, size_t );
 
@@ -356,6 +358,9 @@ void freewheel(bool fw){
   }
 }
 
+// issuing this command during a home or a jog should cause
+// wait_for_move to take the full timeout to recover
+// estop(false) can not be called from the ISR (only true can)
 void estop(bool stop){
   if (stop){
     BIT_SET(ENN_PORT, ENN_BIT); // power off driver
@@ -479,11 +484,47 @@ int handle_cmd(bool slo_mode){
       }
       break;
 
-    case 'f': // denter freewheel mode (drive can kinda freely spin)
-      freewheel(true);
-      out_buf[0] = 'p'; // press p for pass
-      cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-      rdy_to_send = 1;
+    case 'a': // jog direction a command
+    case 'b': // jog direction b command
+      if(blocked){
+        out_buf[0] = 'f';
+        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+        rdy_to_send = 1;
+      } else { //not blocked
+        stage_length = -1;
+        if(slo_mode){  // processing in main loop, not ISR
+          cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+          blocked = true; // block duiring jog
+          if (this_cmd == 'a'){
+            jog(0); // jog in direction 0 (same as initial homing direction)
+          } else {
+            jog(1); // jog in direction 1 (opposite to that of initial homing direction)
+          }
+          stage_length = 0;
+          blocked = false;
+        } else { // processing in ISR, not main loop.
+          // accept the jogging command, and respond immediately to the master
+          // but don't actually execute the jogging procedure here
+          // instead we leave that to be done in the main loop later
+          out_buf[0] = 'p';
+          rdy_to_send = 1;
+        }
+      }
+      break;
+
+    case 'f': // enter freewheel mode (drive can kinda freely spin)
+      if(blocked){
+        out_buf[0] = 'f';
+        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+        rdy_to_send = 1;
+      } else { //not blocked
+        if(slo_mode){  // processing in main loop, not ISR
+          freewheel(true);
+          out_buf[0] = 'p'; // press p for pass
+          cmd_byte = 0x00; // clear the cmd _byte. it has been handled
+          rdy_to_send = 1;
+        }
+      }
       break;
 
     case 'd': // disable drive
@@ -559,6 +600,7 @@ int handle_cmd(bool slo_mode){
 // 0 completed because target position reached
 // 1 completed because there was a stall
 // 2 exited because of a timeout (was moving for too long)
+// 3 exited because we noticed the motor driver power has been removed
 int wait_for_move(int32_t timeout_ms){ //timeout_ms defaults to MOVE_TIMEOUT
   int32_t move_start_timeout = 500; // let's wait up to this long for the motion to begin
   int32_t t0 = millis();
@@ -585,10 +627,15 @@ int wait_for_move(int32_t timeout_ms){ //timeout_ms defaults to MOVE_TIMEOUT
     if (this_status & BIT3){ // bit 3 is for standstill
       break; // we're standing still
     }
+    if (BIT_GET(ENN_PORT, ENN_BIT)){
+      break;
+    }
     elapsed = millis()-t0;
   } while( elapsed < timeout_ms);
 
-  if (elapsed >= timeout_ms){
+  if (BIT_GET(ENN_PORT, ENN_BIT)){
+    ret_code = 3;
+  } else if (elapsed >= timeout_ms){
     ret_code = 2;
   } else if (this_status & BIT5) {
     ret_code = 0;
@@ -617,6 +664,39 @@ bool go_to (int32_t target) {
     }
   }
   return (return_code);
+}
+
+// this is basically half the homing procedure only with configuratble direction
+// noteably it can not perform a proper back off from the end once it hits it because
+// i can't know the stage length. this function should be used in only very special cases
+// because it leaves teh sled in a position where it could possibly be driven in the wrong
+// direction without the ability to stall correctly
+void jog(int dir){
+  D(Serial.println("Jogging started..."));
+
+  estop(false); // in case we were in emergency stop, re-enable
+  freewheel(false); // in case freewheel was on, disable it
+  wait_for_move(); // just in case some other movement was going on, let's wait for that to finish
+  clear_stall();  // and in case that movement caused a stall, let's clear it
+
+  if (dir == 0){ // this is the same direction that the motor starts moving for the home command
+    // move in the negative direction
+    tmc5130_writeInt(TMC5130, TMC5130_RAMPMODE, TMC5130_MODE_VELNEG);
+  } else if (dir == 1){
+    // move in the positive direction
+    tmc5130_writeInt(TMC5130, TMC5130_RAMPMODE, TMC5130_MODE_VELPOS);
+  } else {
+    return;
+  }
+
+  // don't actually care why the move ended, really
+  wait_for_move();
+
+  // i'm not even going to clear the stall here because the next action has to be a home
+
+  D(Serial.println("Jogging completed."));
+
+  return;
 }
 
 // homing/stage length measurement task
