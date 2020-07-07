@@ -21,7 +21,19 @@ platformio init --board ATmega328PB -d pio-stepper
 (cd pio-stepper/src && ln -sf ../../stepper-uC/* .)
 ```
 
-## Build
+## Usage
+```
+./compile-and-flash.sh pio-main # Build for main uC
+./compile-and-flash.sh pio-stepper # Build for stepper uC
+
+./compile-and-flash.sh pio-main fadsfdsafsad # list detected targets
+
+./compile-and-flash.sh pio-main /dev/ttyUSBX # flash main
+./compile-and-flash.sh pio-stepper/dev/ttyUSBX # flash stepper
+```
+
+### Misc PIO commands:
+build:
 ```
 # for the stepper uC:
 pio run -d pio-stepper
@@ -30,7 +42,7 @@ pio run -d pio-stepper
 pio run -d pio-main
 ```
 
-## Flash
+flash:
 ```
 #pio device list # to figure out where to upload
 MAIN_PORT=/dev/ttyACMX
@@ -43,7 +55,7 @@ pio run -d pio-stepper --target upload --upload-port ${STEPPER_PORT}
 pio run -d pio-main --target upload --upload-port ${MAIN_PORT}
 ```
 
-## Debug
+debug: 
 ```
 # for the stepper uC:
 device monitor -b 115200 -p ${STEPPER_PORT}

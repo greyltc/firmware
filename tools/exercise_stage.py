@@ -11,10 +11,11 @@ import serial
 
 PROMPT = b'>>> '  # the firmware's prompt
 EOL = b'\r\n'  # client-->server transmission line ending the firmware expects
+
 #default_host = "WIZnet111785.lan"
 default_host = "10.46.0.233"
 
-parser = argparse.ArgumentParser(description=f'Does stuff with the sage')
+parser = argparse.ArgumentParser(description=f'Firmware comms & system testing')
 parser.add_argument('-s', '--server-hostname', type=str, default=default_host,
                     help='hostname or IP address of server to connect to')
 parser.add_argument('-c', '--sourcemeter-comport', type=str, default="/dev/ttyUSB0",
@@ -25,7 +26,7 @@ parser.add_argument('-o', '--home', action="store_true",
                     help='homes the stage')
 parser.add_argument('-b', '--bounce', action="store_true",
                     help='homes the stage then bounces it between 10 and 90 percent forever')
-parser.add_argument('-a', '--axis', type=int, default=0,
+parser.add_argument('-a', '--axis', type=int, default=1,
                     help='axis to operate on')
 parser.add_argument('-g', '--goto', type=int,
                     help='sends the stage somewhere')
@@ -152,12 +153,12 @@ def otterhome(tn, timeout = 250):
                 if (ret_val == 0):
                     break
             if (ret_val == 0):
-                ret_val = home(tn,1)
+                ret_val = home(tn,1, timeout = (timeout-(time.time() - t0)))
                 if (ret_val > 0):
                     xval = ret_val
-                    ret_val = goto(tn, 1, 100000, timeout = 80) # sends x to otter safe location
+                    ret_val = goto(tn, 1, 100000, timeout = (timeout-(time.time() - t0))) # sends x to otter safe location
                     if (ret_val == 0):
-                        ret_val = home(tn,2)
+                        ret_val = home(tn,2, timeout = (timeout-(time.time() - t0)))
                         if (ret_val > 0):
                             yval = ret_val
                             ret_val = [xval,yval]
