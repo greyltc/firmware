@@ -566,7 +566,8 @@ uint32_t loop_counter = 0ul;
 uint32_t led_blink_loops = 5000ul; // led changes state every this many loops
 #endif // NO_LED
 
-uint32_t long_while_loops = 50000000ul; 
+// one long while ~= 30 minutes (this might change if the main loop changes speed)
+uint32_t long_while_loops = 1200ul; 
 
 // main program loop
 void loop() {
