@@ -330,8 +330,8 @@ with MyTelnet(args.server_hostname) as tn:
             print(f'The stage is {home_result} steps long.')
 
     if args.ohome == True:
-        expected_length_1 = 432
-        safe_spot_1 = 100000
+        expected_length_1 = 5576961
+        safe_spot_1 = 3500000
         home_result = otterhome(tn, expected_length_1, safe_spot_1)
         if home_result <= 0:
             if home_result == -1:
