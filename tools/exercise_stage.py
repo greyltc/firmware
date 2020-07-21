@@ -24,6 +24,8 @@ parser.add_argument('-w', '--switch', action="store_true",
                     help='round-robin switch all switches')
 parser.add_argument('-o', '--home', action="store_true",
                     help='homes the stage')
+parser.add_argument('-t', '--ohome', action="store_true",
+                    help='otter-homes the stage')
 parser.add_argument('-b', '--bounce', action="store_true",
                     help='homes the stage then bounces it between 10 and 90 percent forever')
 parser.add_argument('-a', '--axis', type=int, default=1,
@@ -50,11 +52,10 @@ def sock_read_until(s, match, timeout=None):
 
 class MyTelnet(Telnet):
     def read_response(self, timeout=None):
-        self.empty_response = False
         resp = self.read_until(PROMPT, timeout=timeout)
         ret = resp.rstrip(PROMPT).decode().strip()
         if len(resp) == 0:
-            self.empty_response = True
+            ret = None  # nothing came back (likely a timeout)
         return ret
 
     def send_cmd(self, cmd):
@@ -64,109 +65,164 @@ class MyTelnet(Telnet):
 # with retries, stall detection and timeout
 # returns:
 #  0 if the stage went there
-# -1 if it did not go there and needs to be re-homed
-# -2 if the timeout expired before it got there
-# -3 is a programming error
-def goto(tn, axis, position, timeout = 20):
+# -1 if there was a timeout before it got there
+# -2 if a command was not properly acknowledged by the controlbox
+# -5 is a programming error
+def goto(tn, axis, position, timeout = 80):
     position = round(position) # must be a whole number of steps
-    ret_val = -3
+    ret_val = -5
     retries = 5
     each_timeout = timeout/retries
     position_poll_freq = 0.5
 
-    while retries > 0:
+    while retries >= 0:
+        retries = retries - 1
         tn.send_cmd(f'g{axis}{position:.0f}')
-        resp = tn.read_response(timeout=1)
-        if resp == '': # goto command accepted
+        response = tn.read_response(timeout=1)
+        if response != '':
+            ret_val = -2
+            # goto command fail. this likely means the stage is unhomed either because it stalled or it just powered on
+            #raise(ValueError(f"Sending the goto command failed: {response}"))
+        else:
             loc = None
             t0 = time.time()
             now = 0
             while (loc != position) and (now <= each_timeout): # poll for position
-                tn.send_cmd(f'r{axis}') # ask for current position
-                loc = int(tn.read_response(timeout=1))
-                print(f'Location = {loc}') # for debugging
                 time.sleep(position_poll_freq)
+                tn.send_cmd(f'r{axis}') # ask for current position
+                response = tn.read_response(timeout=1)
+                try:
+                    loc = int(response)
+                except:
+                    ret_val = -2
+                    # read position command failed
+                    #raise(ValueError(f"Requesting the position failed: {response}"))
+                    break
+                #print(f'Location = {loc}') # for debugging
                 now = time.time() - t0
-            if now > each_timeout: # exited above loop because of microtimeout, retry
-                ret_val = -2
-                retries = retries - 1
-            else: # we got there
+            if loc == position: # we got there
                 ret_val = 0
-                break
-        else: # goto command fail. this likely means the stage is unhomed either because it stalled or it just powered on
-            ret_val = -1
-            break
+                break  # break out of the retry loop
+            elif (now > each_timeout):
+                ret_val = -1
     return(ret_val)
 
 # homes the stage
 # returns:
 # -1 if the homing timed out
-# -2 if there was a programming error
+# -2 if a command was not properly acknowledged by the controlbox (possibly already homing?)
+# -5 if there was a programming error
 # the length of the stage in steps for a successful home
 def home(tn, axis, timeout = 80):
-    ret_val = -2
+    ret_val = -5
     print('HOMING!')
     tn.send_cmd(f'h{axis}')
-    response = tn.read_response(timeout) # get home response
+    response = tn.read_response(timeout=1) # get home response
 
     if response != '':
-        raise(ValueError(f"Homing the stage failed: {response}"))
+        ret_val = -2
+        #raise(ValueError(f"Sending the home command failed: {response}"))
     else:
-        if tn.empty_response == True: # we never got the prompt back
-            ret_val = -2
-        else:
-            t0 = time.time()
-            dt = 0
-            while(dt<timeout):
-                time.sleep(0.1)
-                tn.send_cmd(f'l{axis}')
-                ret_val = int(tn.read_response())
-                dt = time.time() - t0
+        t0 = time.time()
+        dt = 0
+        while(dt<timeout):
+            time.sleep(0.1)
+            tn.send_cmd(f'l{axis}')
+            response = tn.read_response(timeout=1)
+            try:
+                ret_val = int(response)
+            except:
+                ret_val = -2
+                #raise(ValueError(f"Requesting the length failed: {response}"))
+                break
+            if ret_val > 0:  # good stage length
+                break
+            dt = time.time() - t0
+    return(ret_val)
 
+# jogs the stage to one end
+# takes:
+# axis number
+# jog direction ('a' or 'b')
+# timeout in seconds
+# returns:
+# -1 if the jogging timed out
+# -2 if a command was not properly acknowledged by the controlbox (possibly already homing or jogging?)
+# -5 if there was a programming error
+# the length of the stage in steps for a successful home
+def jog(tn, axis, direction='b',timeout = 80):
+    ret_val = -5
+    print('JOGGING!')
+    tn.send_cmd(f'j{axis}{direction}')
+    response = tn.read_response(timeout=1) # get jog response
+
+    if response != '':
+        ret_val = -2
+        #raise(ValueError(f"Sending the jog command failed: {response}"))
+    else:
+        t0 = time.time()
+        dt = 0
+        while(dt<timeout):
+            time.sleep(0.1)
+            tn.send_cmd(f'l{axis}')
+            response = tn.read_response(timeout=1)
+            try:
+                ret_val = int(response)
+            except:
+                ret_val = -2
+                #raise(ValueError(f"Requesting the length failed: {response}"))
+                break
+            if ret_val == 0:  # jogging complete
+                break
+            dt = time.time() - t0
     return(ret_val)
 
 # otter homes the system
+# takes:
+# a telnet connection object
+# the expected length of axis 1 in steps
+# the location in steps along axis 1 where it's safe to home axis 2
+# the a timeout value in seconds
 # returns:
 # -1 if the homing timed out
-# -2 if there was a programming error
-# -3 stall or timeout during safe move
+# -2 if a command was not properly acknowledged by the controlbox
+# -3 stall or timeout during goto for axis 1 safety move
+# -4 axis 1 was an unexpected length
+# -5 there was a programming error
 # the stage dims in (x, y) steps
-def otterhome(tn, timeout = 250):
-    ret_val = -2
+def otterhome(tn, expected_len_1, safe_spot_1, timeout = 250):
+    within_percentage = 2  # acutal length must be within this percent of actual length to avoid error
+    ret_val = -5
     print('HOMING!')
-    tn.send_cmd(f'j2b')
-    response = tn.read_response(timeout) # get home response
-
-    if response != '':
-        raise(ValueError(f"Homing the stage failed: {response}"))
-    else:
-        if tn.empty_response == True: # we never got the prompt back
-            ret_val = -2
-        else:
-            t0 = time.time()
-            dt = 0
-            while(dt<timeout):
-                time.sleep(0.1)
-                tn.send_cmd(f'l2')
-                ret_val = int(tn.read_response())
-                dt = time.time() - t0
-                if (ret_val == 0):
-                    break
-            if (ret_val == 0):
-                ret_val = home(tn,1, timeout = (timeout-(time.time() - t0)))
-                if (ret_val > 0):
-                    xval = ret_val
-                    ret_val = goto(tn, 1, 100000, timeout = (timeout-(time.time() - t0))) # sends x to otter safe location
-                    if (ret_val == 0):
-                        ret_val = home(tn,2, timeout = (timeout-(time.time() - t0)))
-                        if (ret_val > 0):
-                            yval = ret_val
-                            ret_val = [xval,yval]
-                    else: # bad goto
-                        if (ret_val == -1) or (ret_val == -2):
-                            ret_val = -3
-                        else:
-                            ret_val = -2 
+    t0 = time.time()
+    ret_val = jog(tn, 2, direction='b',timeout = timeout)
+    if (ret_val == 0):  # ax2 jog complete
+        dt = time.time() - t0
+        if dt < timeout:
+            # SHOULD now be safe to home axis 1
+            ret_val = home(tn, 1, timeout = (timeout-dt))
+            if (ret_val > 0):
+                xval = ret_val
+                # check for expected length for axis 1
+                if (xval < expected_len_1*(1+within_percentage/100)) and (xval > expected_len_1*(1-within_percentage/100)):
+                    dt = time.time() - t0
+                    if dt < timeout:
+                        ret_val = goto(tn, 1, safe_spot_1, timeout = (timeout-dt)) # sends x to otter safe location
+                        if (ret_val == 0):
+                            dt = time.time() - t0
+                            if dt < timeout:
+                                ret_val = home(tn, 2, timeout = (timeout-dt))
+                                if (ret_val > 0):
+                                    yval = ret_val
+                                    ret_val = [xval,yval]
+                            else:  # timeout just before 2nd home
+                                ret_val = -1
+                    else:  # timeout just before goto
+                        ret_val = -1
+                else:  # unexpected length for axis 1
+                    ret_val = -4
+        else:  # timeout 
+            ret_val = -1
     return(ret_val)
 
 
@@ -265,6 +321,18 @@ with MyTelnet(args.server_hostname) as tn:
 
     if args.home == True:
         home_result = home(tn, args.axis)
+        if home_result <= 0:
+            if home_result == -1:
+                print ('Homing timed out.')
+            else:
+                raise(ValueError(f"Error homing stage: {home_result}"))
+        else:
+            print(f'The stage is {home_result} steps long.')
+
+    if args.ohome == True:
+        expected_length_1 = 432
+        safe_spot_1 = 100000
+        home_result = otterhome(tn, expected_length_1, safe_spot_1)
         if home_result <= 0:
             if home_result == -1:
                 print ('Homing timed out.')

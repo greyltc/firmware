@@ -664,7 +664,7 @@ void command_handler(EthernetClient c, String cmd){
     for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
       stage_send_home(i);
     }
-  } else if (cmd.equals("iv")){ //switch relays to sourcemeter
+  } else if (cmd.equals("iv")){ //switch relays to sourcemeter (needs to be before the iX command)
     digitalWrite(RELAY3_PIN, LOW);
     digitalWrite(RELAY4_PIN, LOW);
   } else if (cmd.equals("eqe")){ //switch relays to lock-in
