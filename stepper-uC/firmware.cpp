@@ -19,8 +19,10 @@
 #define MOVE_TIMEOUT 120000
 
 // I2C timeouts
-//#define I2C_TIMEOUT_US 25000ul //25ms
-#define I2C_TIMEOUT_US 100000ul //100ms
+//#define I2C_TIMEOUT_US 25000ul // number in micros, 25ms
+#define I2C_TIMEOUT_US 100000ul // number in micros, 100ms
+//#define SEND_LATER_TIMEOUT = 250000ul; // number in micros, give up on send later after waiting this long
+#define SEND_LATER_TIMEOUT = 500000ul; // number in micros, give up on send later after waiting this long
 
 // for debugging
 //#define MOVE_TIMEOUT 5000
