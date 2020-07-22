@@ -446,6 +446,7 @@ void setup() {
   Wire.begin(); // for I2C
   // the wire module now times out and resets itsself to prevent lockups
   Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
+  Wire.setClock(10000ul); // try slower (the default is 100000)
 
   // ============= ethernet setup ==============
   D(Serial.println(F("Getting IP via DHCP...")));
