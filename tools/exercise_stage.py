@@ -73,7 +73,7 @@ class MyTelnet(Telnet):
 def goto(tn, axis, position, timeout = 80):
     position = round(position) # must be a whole number of steps
     ret_val = -5
-    retries = 5
+    retries = 10
     each_timeout = timeout/retries
     position_poll_freq = 0.5
 
@@ -116,11 +116,17 @@ def goto(tn, axis, position, timeout = 80):
 # -5 if there was a programming error
 # the length of the stage in steps for a successful home
 def home(tn, axis, timeout = 80):
+    n_retries = 10
     ret_val = -5
     print('HOMING!')
-    tn.send_cmd(f'h{axis}')
-    response = tn.read_response(timeout=1) # get home response
-
+    try_number = 0
+    while (try_number < n_retries):
+        tn.send_cmd(f'h{axis}')
+        response = tn.read_response(timeout=1) # get home response
+        if response == '':
+            break
+        try_number = try_number + 1
+    
     if response != '':
         ret_val = -2
         #raise(ValueError(f"Sending the home command failed: {response}"))
@@ -133,9 +139,9 @@ def home(tn, axis, timeout = 80):
             try:
                 ret_val = int(response)
             except:
-                ret_val = -2
+                ret_val = -2 
                 #raise(ValueError(f"Requesting the length failed: {response}"))
-                break
+                #break # errors are acceptable, don't break
             if ret_val > 0:  # good stage length
                 break
             dt = time.time() - t0
@@ -151,28 +157,33 @@ def home(tn, axis, timeout = 80):
 # -2 if a command was not properly acknowledged by the controlbox (possibly already homing or jogging?)
 # -5 if there was a programming error
 # the length of the stage in steps for a successful home
-def jog(tn, axis, direction='b',timeout = 80):
+def jog(tn, axis, direction='b', timeout = 80):
+    n_retries = 10
     ret_val = -5
     print('JOGGING!')
-    tn.send_cmd(f'j{axis}{direction}')
-    response = tn.read_response(timeout=1) # get jog response
-
+    try_number = 0
+    while (try_number < n_retries):
+        tn.send_cmd(f'j{axis}{direction}')
+        response = tn.read_response(timeout=1) # get jog response
+        if response == '':
+            break
+        try_number = try_number + 1
+    
     if response != '':
         ret_val = -2
-        #raise(ValueError(f"Sending the jog command failed: {response}"))
+        #raise(ValueError(f"Sending the home command failed: {response}"))
     else:
         t0 = time.time()
         dt = 0
         while(dt<timeout):
-            time.sleep(0.1)
             tn.send_cmd(f'l{axis}')
             response = tn.read_response(timeout=1)
             try:
                 ret_val = int(response)
             except:
-                ret_val = -2
+                ret_val = -2 
                 #raise(ValueError(f"Requesting the length failed: {response}"))
-                break
+                #break # errors are acceptable, don't break
             if ret_val == 0:  # jogging complete
                 break
             dt = time.time() - t0
