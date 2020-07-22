@@ -19,10 +19,10 @@
 #define MOVE_TIMEOUT 120000
 
 // I2C timeouts
-//#define I2C_TIMEOUT_US 25000ul // number in micros, 25ms
-#define I2C_TIMEOUT_US 100000ul // number in micros, 100ms
-//#define SEND_LATER_TIMEOUT = 250000ul; // number in micros, give up on send later after waiting this long
-#define SEND_LATER_TIMEOUT = 500000ul; // number in micros, give up on send later after waiting this long
+#define I2C_TIMEOUT_US 25000ul // number in micros, 25ms
+//#define I2C_TIMEOUT_US 100000ul // number in micros, 100ms
+#define SEND_LATER_TIMEOUT = 250000ul; // number in micros, give up on send later after waiting this long
+//#define SEND_LATER_TIMEOUT = 500000ul; // number in micros, give up on send later after waiting this long
 
 // for debugging
 //#define MOVE_TIMEOUT 5000
@@ -134,7 +134,7 @@ volatile uint8_t status; // status byte from the driver
 #define RESP_BUF_LEN 20
 static uint8_t out_buf[RESP_BUF_LEN] = { 'f' };
 volatile int bytes_ready = 0;
-uint32_t send_later_timeout = 250000ul; // 250 ms
+//uint32_t send_later_timeout = 250000ul; // 250 ms
 
 // command buffer
 #define CMD_BUF_LEN 20
@@ -319,7 +319,7 @@ void loop() {
   }
 
   // give up on clock stretch
-  if ((send_later) && (send_later_timeout < (micros() - send_later_t0))){
+  if ((send_later) && (SEND_LATER_TIMEOUT < (micros() - send_later_t0))){
     send_later = false;
     Wire.write(0x00);
     Wire.flush();
