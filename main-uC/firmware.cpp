@@ -355,6 +355,7 @@ bool MCP_SPI = true;
 //#define I2C_TIMEOUT_US 10000000ul; //10s
 #define I2C_TIMEOUT_US 25000ul //number in micros, 25ms
 //#define I2C_TIMEOUT_US 100000ul // number in micros, 100ms
+#define I2C_FREQ 100000ul // default is 100kHz
 
 // setup telnet server
 EthernetServer server(serverPort);
@@ -447,7 +448,7 @@ void setup() {
   Wire.begin(); // for I2C
   // the wire module now times out and resets itsself to prevent lockups
   Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
-  Wire.setClock(10000ul); // try slower (the default is 100000)
+  Wire.setClock(I2C_FREQ); // (the default is 100000)
 
   // ============= ethernet setup ==============
   D(Serial.println(F("Getting IP via DHCP...")));
