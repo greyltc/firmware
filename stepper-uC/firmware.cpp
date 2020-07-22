@@ -316,6 +316,7 @@ void loop() {
   if ((send_later) && (send_later_timeout < (micros() - send_later_t0))){
     send_later = false;
     Wire.write(0x00);
+    Wire.flush();
   }
 
 // #ifdef DEBUG // bouncy motion testing/debugging
