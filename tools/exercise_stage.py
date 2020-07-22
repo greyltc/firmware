@@ -32,6 +32,8 @@ parser.add_argument('-a', '--axis', type=int, default=1,
                     help='axis to operate on')
 parser.add_argument('-g', '--goto', type=int,
                     help='sends the stage somewhere')
+parser.add_argument('-e', '--check', type=int, default=0,
+                    help='do this many stage controller comms checks')
 
 args = parser.parse_args()
 
@@ -126,7 +128,6 @@ def home(tn, axis, timeout = 80):
         t0 = time.time()
         dt = 0
         while(dt<timeout):
-            time.sleep(0.1)
             tn.send_cmd(f'l{axis}')
             response = tn.read_response(timeout=1)
             try:
@@ -175,6 +176,28 @@ def jog(tn, axis, direction='b',timeout = 80):
             if ret_val == 0:  # jogging complete
                 break
             dt = time.time() - t0
+    return(ret_val)
+
+
+# checks comms to a stage controller
+# takes:
+# axis number
+# timeout in seconds
+# returns:
+# 0 if the check was successful
+# -2 if a command was not properly acknowledged by the controlbox (possibly already homing or jogging?)
+# -5 if there was a programming error
+# the length of the stage in steps for a successful home
+def stage_check(tn, axis, timeout = 1):
+    ret_val = -5
+    tn.send_cmd(f'e{axis}')
+    response = tn.read_response(timeout=timeout) # get check response
+
+    if response != '':
+        ret_val = -2
+        #raise(ValueError(f"Sending the jog command failed: {response}"))
+    else:
+        ret_val = 0
     return(ret_val)
 
 # otter homes the system
@@ -365,5 +388,16 @@ with MyTelnet(args.server_hostname) as tn:
             else:
                 there = True
 
+    if args.check > 0:
+        n_checks = args.check
+        failures = 0
+
+        while n_checks > 0:
+            result = stage_check(tn, args.axis)
+            if stage_check(tn, args.axis) !=0:
+                failures = failures + 1
+            n_checks = n_checks - 1
+        
+        print(f"failures:attempts = {failures}:{args.check}")
 
 print('done!')

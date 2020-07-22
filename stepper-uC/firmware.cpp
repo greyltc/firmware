@@ -588,7 +588,7 @@ int handle_cmd(bool slo_mode){
       break;
 
     default:
-      out_buf[0] = 'f'; // press f for fail
+      out_buf[0] = 'u'; // press u for unknown command
       cmd_byte = 0x00; // clear the cmd_byte. it has been handled
       rdy_to_send = 1;
   } // end switch

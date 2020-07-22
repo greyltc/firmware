@@ -1017,7 +1017,7 @@ bool stage_comms_check(int axis){
 
 // sends home command to an axis
 char stage_send_home(int axis){
-  char result = 'f';
+  char result = 'e';
   int addr;
   int bytes_to_read;
 
@@ -1038,7 +1038,7 @@ char stage_send_home(int axis){
 
 // jogs stage in a direction
 char stage_jog(int axis, char dir){
-  char result = 'f';
+  char result = 'e';
   int addr;
   int bytes_to_read;
 
@@ -1061,7 +1061,7 @@ char stage_jog(int axis, char dir){
 
 // sends powerdown command to an axis
 char stage_powerdown(int axis){
-  char result = 'f';
+  char result = 'e';
   int addr;
   int bytes_to_read;
 
@@ -1082,7 +1082,7 @@ char stage_powerdown(int axis){
 
 // sends freewheel command to an axis
 char stage_freewheel(int axis){
-  char result = 'f';
+  char result = 'e';
   int addr;
   int bytes_to_read;
 
@@ -1103,7 +1103,7 @@ char stage_freewheel(int axis){
 
 // gets the length of an axis
 void stage_get_len(EthernetClient c, int axis){
-  char result = 'f';
+  char result = 'e'; 
   int addr;
   int bytes_to_read;
   int32_t length = 0;
@@ -1138,7 +1138,7 @@ void stage_get_len(EthernetClient c, int axis){
 
 // reads back the stage position
 void stage_get_pos(EthernetClient c, int axis){
-  char result = 'f';
+  char result = 'e';
   int addr;
   int bytes_to_read;
   int32_t pos = 0;
@@ -1173,7 +1173,7 @@ void stage_get_pos(EthernetClient c, int axis){
 
 // sends the stage somewhere
 void stage_go_to(EthernetClient c, int axis, int32_t position){
-  char result = 'f';
+  char result = 'e';
   int addr;
   int bytes_to_read;
   Lb lb; //our int32_t buffer
@@ -1200,7 +1200,7 @@ void stage_go_to(EthernetClient c, int axis, int32_t position){
 
 // gets stage status byte
 void stage_status(EthernetClient c, int axis){
-  char result = 'f';
+  char result = 'e';
   int addr;
   int bytes_to_read;
   uint8_t status = 0;
