@@ -353,7 +353,8 @@ bool MCP_SPI = true;
 
 // I2C timeouts
 //#define I2C_TIMEOUT_US 10000000ul; //10s
-#define I2C_TIMEOUT_US 25000ul //25ms
+//#define I2C_TIMEOUT_US 25000ul //25ms
+#define I2C_TIMEOUT_US 100000ul //100ms
 
 // setup telnet server
 EthernetServer server(serverPort);

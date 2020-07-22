@@ -18,6 +18,10 @@
 //maximum number of milliseonds any homing move could possibly take
 #define MOVE_TIMEOUT 120000
 
+// I2C timeouts
+//#define I2C_TIMEOUT_US 25000ul //25ms
+#define I2C_TIMEOUT_US 100000ul //100ms
+
 // for debugging
 //#define MOVE_TIMEOUT 5000
 
@@ -260,7 +264,7 @@ void setup() {
   
   // setup I2C
   Wire.begin(I2C_SLAVE_ADDRESS);
-  Wire.setWireTimeoutUs(25000ul, true);
+  Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(requestEvent); // register event
 
