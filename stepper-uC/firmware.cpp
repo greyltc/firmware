@@ -21,7 +21,7 @@
 // I2C timeouts
 #define I2C_TIMEOUT_US 25000ul // number in micros, 25ms
 //#define I2C_TIMEOUT_US 100000ul // number in micros, 100ms
-#define SEND_LATER_TIMEOUT = 250000ul; // number in micros, give up on send later after waiting this long
+#define SEND_LATER_TIMEOUT 250000ul; // number in micros, give up on send later after waiting this long
 //#define SEND_LATER_TIMEOUT = 500000ul; // number in micros, give up on send later after waiting this long
 
 // for debugging
