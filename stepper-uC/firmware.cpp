@@ -263,6 +263,7 @@ void setup() {
   Wire.setWireTimeoutUs(25000ul, true);
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(requestEvent); // register event
+  Wire.setClock(10000ul); // try slower (the default is 100000)
 
   D(Serial.println("Setup complete."));
 
