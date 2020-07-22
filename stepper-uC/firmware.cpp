@@ -1,5 +1,5 @@
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 0
+#define VERSION_MINOR 1
 #define VERSION_PATCH 1
 #define BUILD d44d9f3
 
@@ -121,12 +121,14 @@ void estop(bool);
 volatile int32_t stage_length = 0; // this is zero when homing has not been done, -1 while homing
 volatile bool blocked = false; // set this when we don't want to accept new movement commands
 volatile bool send_later = false; // the master has asked for bytes but we have none ready
+volatile uint32_t send_later_t0; // timer to keep track of how long it's been since send_later was set (in micros)
 volatile uint8_t status; // status byte from the driver
 
 // response buffer for i2c responses to requests from the master
 #define RESP_BUF_LEN 20
 static uint8_t out_buf[RESP_BUF_LEN] = { 'f' };
 volatile int bytes_ready = 0;
+uint32_t send_later_timeout = 250000ul; // 250 ms
 
 // command buffer
 #define CMD_BUF_LEN 20
@@ -308,6 +310,12 @@ void loop() {
         Wire.flush();
       }
     }
+  }
+
+  // give up on clock stretch
+  if ((send_later) && (send_later_timeout < (micros() - send_later_t0))){
+    send_later = false;
+    Wire.write(0x00);
   }
 
 // #ifdef DEBUG // bouncy motion testing/debugging
@@ -829,6 +837,7 @@ bool requestEvent(void){
     // we've been unable to respond to the master from the ISR
     // we'll have to do it later, in the main loop
     send_later = true; // this will trigger clock stretching
+    send_later_t0 = micros(); // record the time
     // which will be ended by the call to Wire.flush() from the main loop
   }
   return(send_later);
