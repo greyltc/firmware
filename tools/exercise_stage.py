@@ -15,6 +15,9 @@ EOL = b'\r\n'  # client-->server transmission line ending the firmware expects
 #default_host = "WIZnet111785.lan"
 default_host = "10.46.0.233"
 
+expected_otter_length_1 = 5579011
+expected_otter_length_2 = 2401283
+
 parser = argparse.ArgumentParser(description=f'Firmware comms & system testing')
 parser.add_argument('-s', '--server-hostname', type=str, default=default_host,
                     help='hostname or IP address of server to connect to')
@@ -248,7 +251,7 @@ def otterhome(tn, expected_len_1, safe_spot_1, timeout = 250):
                                 ret_val = home(tn, 2, timeout = (timeout-dt))
                                 if (ret_val > 0):
                                     yval = ret_val
-                                    ret_val = [xval,yval]
+                                    ret_val = [xval, yval]
                             else:  # timeout just before 2nd home
                                 ret_val = -1
                     else:  # timeout just before goto
@@ -367,7 +370,7 @@ with MyTelnet(args.server_hostname) as tn:
         expected_length_1 = 5576961
         safe_spot_1 = 3500000
         home_result = otterhome(tn, expected_length_1, safe_spot_1)
-        if home_result <= 0:
+        if len(home_result) == 1:
             if home_result == -1:
                 print ('Homing timed out.')
             else:
