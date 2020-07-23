@@ -1,7 +1,7 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 1
 #define VERSION_PATCH 1
-#define BUILD d44d9f3
+#define BUILD 19a521c
 
 //#define DEBUG
 //#define NO_LED
