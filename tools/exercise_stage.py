@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser(description=f'Firmware comms & system testing')
 parser.add_argument('-s', '--server-hostname', type=str, default=default_host,
                     help='hostname or IP address of server to connect to')
 parser.add_argument('-c', '--sourcemeter-comport', type=str, default="/dev/ttyUSB0",
-                    help='Serial port for sourcemeter (57600 baud, term=<CR+LF>, flow control=on)')
+                    help='Serial port for sourcemeter (57600 baud, term=<LF>, flow control=on)')
 parser.add_argument('-w', '--switch', action="store_true",
                     help='round-robin switch all switches')
 parser.add_argument('-o', '--home', action="store_true",
@@ -343,8 +343,8 @@ with MyTelnet(args.server_hostname) as tn:
                             # sourcemeter needs to be all set up manually for this to work
                             # so maybe: measure ohms. output on.
                             # or: source current. measure voltage. output on.
-                            ser.write('read?\r'.encode())
-                            m = ser.readline() # expects '\n' (<LF> termination)
+                            ser.write('read?\n'.encode())
+                            m = ser.readline()
                             m = m.split(','.encode())
                             v = float(m[0])
                             i = float(m[1])
