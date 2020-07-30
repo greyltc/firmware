@@ -5,14 +5,14 @@
 // ====== start user editable config ======
 
 // when I2C_MUX is defined, we control the pixel selection multiplexer via I2C a la Otter
-#define I2C_MUX
+//#define I2C_MUX
 
 // when NO_RELAY_SHIELD is defined, the relay shield control code is disabled
-//#define NO_RELAY_SHIELD
+#define NO_RELAY_SHIELD
 
 // when BIT_BANG_SPI is defined, port expander SPI comms is on pins 22 25 24 26 (CS MOSI MISO SCK)
 // if it's commented out, it's on pins 48 51 50 52 (CS MOSI MISO SCK)
-//#define BIT_BANG_SPI
+#define BIT_BANG_SPI
  
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
 //#define DEBUG
@@ -30,7 +30,7 @@
 //#define ADS1015
 
 // disable the ADC altogether
-#define NO_ADC
+//#define NO_ADC
 
 // disable comms to the stage
 //#define NO_STAGE
@@ -38,7 +38,7 @@
 // mac address to use for ethernet connection
 #define OTTER_MAC { 0XA8, 0x61, 0x0A, 0xAE, 0x52, 0x60 }
 #define SNAITH_MAC { 0x90, 0xA2, 0xDA, 0x11, 0x17, 0x85 }
-const unsigned char this_mac[6] = OTTER_MAC;
+const unsigned char this_mac[6] = SNAITH_MAC;
 
 // ====== end user editable config ======
 #ifdef DEBUG
@@ -65,7 +65,6 @@ const unsigned char this_mac[6] = OTTER_MAC;
 // #define SPI_ETHERNET_SETTINGS SPISettings(30000000, MSBFIRST, SPI_MODE0)
 
 #include <Wire.h>
-//#include "Wire.h" // today I need my fixed Wire library, https://github.com/greyltc/ArduinoCore-avr/tree/issue%2342
 #ifdef USE_SD
 #include <SD.h>
 #endif //USE_SD
@@ -113,11 +112,13 @@ const char help_f_b[] PROGMEM = "\"fX\", puts axis X in freewheeling mode, just 
 const char help_i_a[] PROGMEM = "i";
 const char help_i_b[] PROGMEM = "\"iX\", gets the status byte for axis X, just \"i\" does so for all connected axes";
 
+#ifndef NO_RELAY_SHIELD
 const char help_eqe_a[] PROGMEM = "eqe";
 const char help_eqe_b[] PROGMEM = "switches relays to connect lockin";
 
 const char help_iv_a[] PROGMEM = "iv";
 const char help_iv_b[] PROGMEM = "switches relays to connect sourcemeter";
+#endif
 
 #ifndef NO_ADC
 const char help_adc_a[] PROGMEM = "adc";
@@ -160,8 +161,10 @@ const char* const help[] PROGMEM  = {
   help_b_a, help_b_b,
   help_f_a, help_f_b,
   help_i_a, help_i_b,
+#ifndef NO_RELAY_SHIELD
   help_eqe_a, help_eqe_b,
   help_iv_a, help_iv_b,
+#endif
 #ifndef NO_ADC
   help_adc_a, help_adc_b,
   help_d_a, help_d_b,
@@ -667,12 +670,14 @@ void command_handler(EthernetClient c, String cmd){
     for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
       stage_send_home(i);
     }
+#ifndef NO_RELAY_SHIELD
   } else if (cmd.equals("iv")){ //switch relays to sourcemeter (needs to be before the iX command)
     digitalWrite(RELAY3_PIN, LOW);
     digitalWrite(RELAY4_PIN, LOW);
   } else if (cmd.equals("eqe")){ //switch relays to lock-in
     digitalWrite(RELAY3_PIN, HIGH);
     digitalWrite(RELAY4_PIN, HIGH);
+#endif
   } else if (cmd.startsWith("h") && (cmd.length() == 2)){ //home request command
     int ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
