@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 1
-#define VERSION_PATCH 1
+#define VERSION_PATCH 3
 #define BUILD 19a521c
 
 //#define DEBUG
@@ -34,7 +34,7 @@
 #define STALL 64
 
 // axis:address --> 1:0x50, 2:0x51, 3:0x52
-#define I2C_SLAVE_ADDRESS 0x51
+#define I2C_SLAVE_ADDRESS 0x50
 
 #include <Arduino.h>
 #include <Wire.h>

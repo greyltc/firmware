@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 1
-#define VERSION_PATCH 2
+#define VERSION_PATCH 3
 #define BUILD 19a521c
 // ====== start user editable config ======
 
