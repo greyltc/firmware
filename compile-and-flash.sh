@@ -23,7 +23,7 @@ if [ $# -eq "2" ]
 then
   if [ -c ${DEVICE_PORT} ]
   then
-    pio run -d "${PROJECT}" --target upload --upload-port ${DEVICE_PORT}
+    pio run -v -d "${PROJECT}" --target upload --upload-port ${DEVICE_PORT}
   else
     echo "ERROR: ${DEVICE_PORT} is not a character device"
     print_usage
@@ -33,5 +33,5 @@ fi
 
 if [ $# -eq "1" ] 
 then
-  pio run -d "${PROJECT}"
+  pio run -v -d "${PROJECT}"
 fi
