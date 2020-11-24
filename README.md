@@ -30,7 +30,7 @@ platformio init --board ATmega328PB -d pio-stepper
 ./compile-and-flash.sh pio-main fadsfdsafsad # list detected targets
 
 ./compile-and-flash.sh pio-main /dev/ttyUSBX # flash main
-./compile-and-flash.sh pio-stepper/dev/ttyUSBX # flash stepper
+./compile-and-flash.sh pio-stepper /dev/ttyUSBX # flash stepper
 ```
 
 ### Misc PIO commands:
