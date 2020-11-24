@@ -24,7 +24,7 @@ then
   if [ -c ${DEVICE_PORT} ]
   then
     pio run -v -t clean -d "${PROJECT}"
-    pio run -v -d "${PROJECT}" --target upload --upload-port ${DEVICE_PORT}
+    pio run --verbose -d "${PROJECT}" --target upload --upload-port ${DEVICE_PORT}
   else
     echo "ERROR: ${DEVICE_PORT} is not a character device"
     print_usage
