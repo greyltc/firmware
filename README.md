@@ -69,10 +69,10 @@ device monitor -b 115200 -p ${MAIN_PORT}
 ### Flashing a .hex
 Flashing a raw .hex firmware file for the stepper driver might look something like this:
 ```
-avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:w:.pio/build/ATmega328PB/firmware.hex:i
+~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:w:.pio/build/ATmega328PB/firmware.hex:i
 ```
 ### Dumping a .hex
 Dumping a .hex firmware file for the stepper driver might look like this:
 ```
-avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:r:firmware_dump.hex:i
+~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:r:firmware_dump.hex:i
 ```
