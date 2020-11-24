@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 1
-#define VERSION_PATCH 3
+#define VERSION_PATCH 4
 #define BUILD c7a71f8
 
 //#define DEBUG
@@ -34,7 +34,7 @@
 #define STALL 64
 
 // axis:address --> 1:0x50, 2:0x51, 3:0x52
-#define I2C_SLAVE_ADDRESS 0x50
+#define I2C_SLAVE_ADDRESS 0x51
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -180,10 +180,10 @@ void setup() {
   tmc5130_writeInt(TMC5130, TMC5130_VSTART, 0);
   tmc5130_writeInt(TMC5130, TMC5130_A1, 1000);
   tmc5130_writeInt(TMC5130, TMC5130_V1, 50000);
-  tmc5130_writeInt(TMC5130, TMC5130_AMAX, 2000);
+  tmc5130_writeInt(TMC5130, TMC5130_AMAX, 1500);
   tmc5130_writeInt(TMC5130, TMC5130_VMAX, VMAX);
-  tmc5130_writeInt(TMC5130, TMC5130_DMAX, 2000);
-  tmc5130_writeInt(TMC5130, TMC5130_D1, 2400);
+  tmc5130_writeInt(TMC5130, TMC5130_DMAX, 1500);
+  tmc5130_writeInt(TMC5130, TMC5130_D1, 1000);
   tmc5130_writeInt(TMC5130, TMC5130_VSTOP, 10);
 
   tmc5130_writeInt(TMC5130, TMC5130_DRVSTATUS, 0);

@@ -9,7 +9,7 @@ print_usage(){
   echo "and device_port is the port to use to program the device."
   echo "not specifying a device_port only builds."
   echo "maybe you can find the right device_port in the output below:"
-  pio device list
+  pio -v device list
   exit -1
 }
 
@@ -23,6 +23,7 @@ if [ $# -eq "2" ]
 then
   if [ -c ${DEVICE_PORT} ]
   then
+    pio run -v -t clean -d "${PROJECT}"
     pio run -v -d "${PROJECT}" --target upload --upload-port ${DEVICE_PORT}
   else
     echo "ERROR: ${DEVICE_PORT} is not a character device"
@@ -33,5 +34,6 @@ fi
 
 if [ $# -eq "1" ] 
 then
+  pio run -v -t clean -d "${PROJECT}"
   pio run -v -d "${PROJECT}"
 fi
