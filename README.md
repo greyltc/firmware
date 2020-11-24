@@ -76,3 +76,9 @@ Dumping a .hex firmware file for the stepper driver might look like this:
 ```
 ~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:r:firmware_dump.hex:i
 ```
+Consider repeating the read and write commands replacing `flash:` once each with `:eeprom`, `:hfuse`, `:lfuse`, `:efuse` though `man avrdude` shows many more memory types.
+### Verifying
+You can verify a `:flash` firmware file on disk matches that in a device with:
+```
+~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:v:file_on_disk.hex:i
+```
