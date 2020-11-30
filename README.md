@@ -71,12 +71,20 @@ Flashing a raw .hex firmware file for the stepper driver might look something li
 ```
 ~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:w:.pio/build/ATmega328PB/firmware.hex:i
 ```
+Main controller flash might look like this:
+```
+~/.platformio/packages/tool-avrdude/avrdude -v -p atmega2560 -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c wiring -b 115200 -D -P "/dev/ttyUSBX" -U flash:w:.pio/build/megaatmega2560/firmware.hex:i
+```
 ### Dumping a .hex
 Dumping a .hex firmware file for the stepper driver might look like this:
 ```
-~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:r:firmware_dump.hex:i
+~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:r:stepper_firmware_dump.hex:i
 ```
 Consider repeating the read and write commands replacing `flash:` once each with `:eeprom`, `:hfuse`, `:lfuse`, `:efuse` though `man avrdude` shows many more memory types.
+Main controller dump might look like this:
+```
+~/.platformio/packages/tool-avrdude/avrdude -v -p atmega2560 -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c wiring -b 115200 -D -P "/dev/ttyUSBX" -U flash:r:main_firmware_dump.hex:i
+```
 ### Verifying
 You can verify a `:flash` firmware file on disk matches that in a device with:
 ```
