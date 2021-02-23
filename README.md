@@ -8,17 +8,18 @@ git clone ${this_project}
 git clone https://github.com/greyltc/ArduinoCore-avr.git # for my wire library mods
 cd ${this_project}
 
+# make sure we have the framework&package we need
+pio platform install --with-package framework-arduino-avr atmelavr
+
 mkdir -p pio-main
 platformio init --board megaatmega2560 -d pio-main
 pio lib -d pio-main install 872  # Arduino's Ethernet library
 #pio lib -d pio-main install 342 # Adafruit's Arduino library for ADS1015/1115 ADCs (only needed for old hardware)
-#(cd "pio-main/.pio/libdeps/megaatmega2560/Adafruit ADS1X15" && ln -sf ../../../../../../ArduinoCore-avr/libraries/Wire/src/* .) # for my wire library mods (only needed for old hardware)
-(cd pio-main/src && ln -sf ../../../ArduinoCore-avr/libraries/Wire/src/* .) # for my wire library mods
 (cd pio-main/src && ln -sf ../../main-uC/* .)
 
 mkdir -p pio-stepper
-platformio init --board ATmega328PB -d pio-stepper
-(cd pio-stepper/src && ln -sf ../../../ArduinoCore-avr/libraries/Wire/src/* .) # currently needed until my wire library mods are merged
+# currently needed until my wire mods are in MCUdude/MiniCore
+platformio init --board ATmega328PB -d pio-stepper --project-option "lib_deps = framework-arduino-avr/Wire" --project-option "lib_extra_dirs = \$PROJECT_CORE_DIR/packages/framework-arduino-avr/libraries"
 (cd pio-stepper/src && ln -sf ../../stepper-uC/* .)
 ```
 

@@ -3,7 +3,9 @@
 #define VERSION_PATCH 4
 #define BUILD 8e1c82a
 
+// when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
 //#define DEBUG
+
 //#define NO_LED
 
 // maximum velocity in microsteps/s
@@ -16,12 +18,12 @@
 #define HOLD_CURRENT 4
 
 //maximum number of milliseonds any homing move could possibly take
-#define MOVE_TIMEOUT 120000
+#define MOVE_TIMEOUT 120000ul
 
 // I2C timeouts
-#define I2C_TIMEOUT_US 25000ul // number in micros, 25ms
+//#define I2C_TIMEOUT_US 25000ul // number in micros, 25ms
 //#define I2C_TIMEOUT_US 100000ul // number in micros, 100ms
-#define SEND_LATER_TIMEOUT 250000ul // number in micros, give up on send later after waiting this long
+//#define SEND_LATER_TIMEOUT 250000ul // number in micros, give up on send later after waiting this long
 //#define SEND_LATER_TIMEOUT 500000ul // number in micros, give up on send later after waiting this long
 
 // for debugging
@@ -34,25 +36,21 @@
 #define STALL 64
 
 // axis:address --> 1:0x50, 2:0x51, 3:0x52
-#define I2C_SLAVE_ADDRESS 0x50
+#define I2C_SLAVE_ADDRESS 0x52
 
 #include <Arduino.h>
 #include <Wire.h>
-#include <util/delay.h>
+#include <util/crc16.h>  // for _crc_xmodem_update
+//#include <util/delay.h>
 #include <avr/io.h>
 extern "C" {
   #include "tmc/ic/TMC5130/TMC5130.h"
 }
 
-
 // create version string
 #define STRINGIFY0(s) # s
 #define STRINGIFY(s) STRINGIFY0(s)
 #define FIRMWARE_VER STRINGIFY(VERSION_MAJOR) "." STRINGIFY(VERSION_MINOR) "." STRINGIFY(VERSION_PATCH) "+" STRINGIFY(BUILD)
-
-#ifndef NO_LED
-#define LED_PIN 3
-#endif
 
 #define BIT_SET(VALUE, BIT_POSITION) ((VALUE) |= (1<<(BIT_POSITION)))
 #define BIT_CLEAR(VALUE, BIT_POSITION) ((VALUE) &= ~(1<<(BIT_POSITION)))
@@ -103,11 +101,10 @@ extern "C" {
 #define ENN_PIN PIND
 #define ENN_BIT 4
 
-
+void do_every_short_while(void);
 int wait_for_move(int32_t timeout_ms = MOVE_TIMEOUT);
 void receiveEvent(int);
-bool requestEvent(void);
-int handle_cmd(bool);
+void requestEvent(void);
 bool go_to (int32_t);
 int32_t home(void);
 void jog(int);
@@ -123,23 +120,27 @@ uint8_t seven_bit_twos_c(int);
 void clear_stall(void);
 void freewheel(bool);
 void estop(bool);
+void reset_drive(void);
+bool validate_message(int);
+int do_isr_cmd(uint8_t);
+int do_main_cmd(uint8_t);
+int prep_response(int);
 
 volatile int32_t stage_length = 0; // this is zero when homing has not been done, -1 while homing
-volatile bool blocked = false; // set this when we don't want to accept new movement commands
-volatile bool send_later = false; // the master has asked for bytes but we have none ready
-volatile uint32_t send_later_t0; // timer to keep track of how long it's been since send_later was set (in micros)
+volatile uint32_t current_position = 0;  // keeps track of where we are now
+volatile bool busy = false; // set this when we don't want to accept new movement commands
 volatile uint8_t status; // status byte from the driver
 
 // response buffer for i2c responses to requests from the master
-#define RESP_BUF_LEN 20
+#define RESP_BUF_LEN 24
 static uint8_t out_buf[RESP_BUF_LEN] = { 'f' };
-volatile int bytes_ready = 0;
-//uint32_t send_later_timeout = 250000ul; // 250 ms
+volatile int bytes_in_out_buf = 0;
 
 // command buffer
-#define CMD_BUF_LEN 20
-volatile uint8_t cmd_byte = 0x00;
+#define CMD_BUF_LEN 24
 static uint8_t in_buf[CMD_BUF_LEN] = { 0x00 };
+static uint8_t pending_in_buf[CMD_BUF_LEN] = { 0x00 };  // to store not yet processed ones
+volatile uint8_t sequence_num = 0;  // the last sequence number we got from the master
 
 // time to wait after powering up the drive
 #define POWER_UP_DELAY 500
@@ -150,11 +151,23 @@ uint8_t TMC5130 = 0;
 // we need to use shadow registers for some of the device registers
 // because some of them are read only and they have mupliple fields
 // we'll keep track of them ourselves here
-uint32_t COOLCONF_shadow_reg = 0;
-uint32_t PWMCONF_shadow_reg = 0x00050480;
-uint32_t IHOLD_IRUN_shadow_reg = 0;
+uint32_t COOLCONF_shadow_reg;
+uint32_t PWMCONF_shadow_reg;
+uint32_t IHOLD_IRUN_shadow_reg;
+
+#ifndef NO_LED
+const unsigned int LED_PIN = 3; // arduino pin for alive LED
+#endif
 
 void setup() {
+  D(Serial.begin(115200));
+  D(Serial.println("Setup started..."));
+
+#ifndef NO_LED
+  // setupLED pin
+  digitalWrite(LED_PIN, LOW); // light off
+  pinMode(LED_PIN, OUTPUT); // light enabled
+#endif // NO_LED
 
   // disable drive
   BIT_SET(ENN_PORT, ENN_BIT);
@@ -165,9 +178,73 @@ void setup() {
   PIN_MODE(SD_MODE, OUTPUT);
 
   spi_setup();
+  reset_drive();
 
-  D(Serial.begin(115200));
+//  D(Serial.println("Location A reached."));
+//  while(true){
+//    NOP;
+//  }
+  
+  // setup I2C
+  Wire.begin(I2C_SLAVE_ADDRESS);
+  Wire.setWireTimeout(25000ul, true);
+  Wire.onReceive(receiveEvent); // register event
+  Wire.onRequest(requestEvent); // register event
 
+  D(Serial.println("Setup complete."));
+}
+
+
+// short while duration
+//5000 ~= 1 second (this might change if the main loop changes speed)
+const uint32_t short_while_loops = 5000ul;
+
+// how many loops we've done
+uint32_t loop_counter = 0ul;
+
+// for timeouts in wait for move
+int32_t time0;
+
+// main program loop
+void loop() {
+  loop_counter++;
+
+  if (loop_counter%short_while_loops == 0){
+    do_every_short_while();
+  }
+
+  // handle a command that can't be done in the ISR
+  if (busy){
+    bytes_in_out_buf = prep_response(do_main_cmd(pending_in_buf[0]));  // handle the command
+    busy = false;
+  } else {
+    // if we're not handling a command, update the thing's position (and ststus byte)
+    current_position = tmc5130_readInt(TMC5130, TMC5130_XACTUAL);
+  }
+}
+
+// appends the sequence number
+// then the a CRC to the n_bytes in out_buf and returns the total ready to send
+int prep_response(int n_bytes){
+  int i = 0;
+  uint16_t crc = 0xffff;  // crc starting value
+  if ((n_bytes > 0) && ((n_bytes+3) <= RESP_BUF_LEN)){
+    out_buf[n_bytes++] = sequence_num;
+    for (i=0; i<n_bytes; i++){
+      crc = _crc_xmodem_update(crc, out_buf[i]);
+    }
+    out_buf[i++] = (crc >> 8) & 0xFF;
+    out_buf[i++] = crc & 0xFF;
+  }
+  return(i);
+}
+
+void reset_drive(void){
+  COOLCONF_shadow_reg = 0;
+  PWMCONF_shadow_reg = 0x00050480;
+  IHOLD_IRUN_shadow_reg = 0;
+
+  BIT_SET(ENN_PORT, ENN_BIT);
   tmc5130_writeInt(TMC5130, TMC5130_XACTUAL, 0);
   tmc5130_writeInt(TMC5130, TMC5130_XTARGET, 0);
 
@@ -257,73 +334,31 @@ void setup() {
   // boot into freewheel mode
   //estop(true); 
   freewheel(true);
-
-#ifndef NO_LED
-  // setupLED pin
-  digitalWrite(LED_PIN, LOW); // light off
-  pinMode(LED_PIN, OUTPUT); // light enabled
-#endif // NO_LED
-  
-  // setup I2C
-  Wire.begin(I2C_SLAVE_ADDRESS);
-  Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
-  Wire.onReceive(receiveEvent); // register event
-  Wire.onRequest(requestEvent); // register event
-
-  D(Serial.println("Setup complete."));
-
-  digitalWrite(LED_PIN, LOW);
 }
 
-#ifndef NO_LED
-uint32_t led_loops = 5000ul;
-#endif // NO_LED
+    
+  //   timesup = false;
+  //   if (rdy_to_send > 0){
+  //     time0 = millis();
+  //     while (!send_later){ // wait for the master to ask us for bytes
+  //       NOP;
+  //       if((millis() - time0) > 500){
+  //         timesup = true;
+  //         break;
+  //       }
+  //     }
+  //     send_later = false;
+  //     if (!timesup){
+  //       Wire.write((uint8_t*)out_buf, rdy_to_send);
+  //     }
+  //   }
+  // }
 
-// how many loops we've done
-uint32_t num_loops = 0ul;
-
-int rdy_to_send; // to store how many bytes are ready to send up to the master
-
-int32_t time0;
-bool timesup = false;
-void loop() {
-  num_loops++;
-#ifndef NO_LED
-  //toggle the alive pin
-  if (num_loops%led_loops == 0){
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-    //PIND = PIND | 0x01<<3; // fast LED on
-  }
-#endif // NO_LED
-
-  // handle a command
-  if (cmd_byte != 0x00){
-    // handle the command in slo mode (commands can take a long time to complete)
-    rdy_to_send = handle_cmd(true);
-    timesup = false;
-    if (rdy_to_send > 0){
-      time0 = millis();
-      while (!send_later){ // wait for the master to ask us for bytes
-        NOP;
-        if((millis() - time0) > 500){
-          timesup = true;
-          break;
-        }
-      }
-      send_later = false;
-      if (!timesup){
-        Wire.write((uint8_t*)out_buf, rdy_to_send);
-        Wire.flush();
-      }
-    }
-  }
-
-  // give up on clock stretch
-  if ((send_later) && (SEND_LATER_TIMEOUT < (micros() - send_later_t0))){
-    send_later = false;
-    Wire.write(0x00);
-    Wire.flush();
-  }
+  // // give up on clock stretch
+  // if ((send_later) && (SEND_LATER_TIMEOUT < (micros() - send_later_t0))){
+  //   send_later = false;
+  //   Wire.write(0x00);
+  // }
 
 // #ifdef DEBUG // bouncy motion testing/debugging
 //   int move_result;
@@ -345,7 +380,9 @@ void loop() {
 //     }
 //   }
 // #endif // DEBUG
-}
+//}
+
+
 
 // clears stall (and other error status).
 // sets target position to current position
@@ -422,6 +459,89 @@ uint8_t rescale_sgt(uint8_t in){
   return(seven_bit_twos_c(i-64));
 }
 
+// takes command byte and does the thing if it should be done in the ISR
+// returns number of bytes that should be transmitted out of out_buf
+// sets in_buf[0] to 0x00 if it handled the command, otherwise leaves it
+int do_isr_cmd(uint8_t cmd){
+  int ret_bytes = 0;
+  switch (cmd){
+    case 'r': // get stage pos
+      out_buf[0] = 'p';
+      memcpy(&out_buf[1], &current_position, 4);
+      //out_buf[1] = (current_position >> 24) & 0xFF;
+      //out_buf[2] = (current_position >> 16) & 0xFF;
+      //out_buf[3] = (current_position >> 8) & 0xFF;
+      //out_buf[4] = current_position & 0xFF;
+      ret_bytes = 5;
+      in_buf[0] = 0x00;
+      break;
+    case 'l': // get stage length
+      out_buf[0] = 'p';
+      out_buf[1] = (stage_length >> 24) & 0xFF;
+      out_buf[2] = (stage_length >> 16) & 0xFF;
+      out_buf[3] = (stage_length >> 8) & 0xFF;
+      out_buf[4] = stage_length & 0xFF;
+      ret_bytes = 5;
+      in_buf[0] = 0x00;
+      break;
+    case 's':  // status byte
+      out_buf[0] = 'p';
+      out_buf[1] = status; //just send the last status we're aware of. if we're blocked it's probably being updated frequently
+      ret_bytes = 2;
+      in_buf[0] = 0x00;
+      break;
+    case 'd':  // power off drive
+      estop(true);
+      out_buf[0] = 'p';
+      in_buf[0] = 0x00;
+      break;
+    case 'c':  // comms check
+      out_buf[0] = 'p';
+      ret_bytes = 1;
+      in_buf[0] = 0x00;
+      break;
+    case 'h':  //home request (to be done later)
+    case 'f':  //freewheel request (to be done later)
+    case 'g':  //move request (to be done later)
+    case 'a':  //jog request (to be done later)
+    case 'b':  //jog request (to be done later)
+      if (busy){
+        out_buf[0] = 'f';
+        in_buf[0] = 0x00;
+      } else {
+        out_buf[0] = 'p';
+      }
+      ret_bytes = 1;
+      break;
+    default:
+      out_buf[0] = 'u'; // press u for unknown command
+      ret_bytes = 1;
+      in_buf[0] = 0x00;
+  }
+  return(ret_bytes);
+}
+
+int do_main_cmd(uint8_t cmd){
+  int ret_bytes = 0;
+  switch (cmd){
+    case 'h':
+      stage_length = home();
+      break;
+    case 'f':
+      freewheel(true);
+      break;
+    case 'a':
+      jog(0);
+      break;
+    case 'b':
+      jog(1);
+      break;
+    case 'g':
+      go_to(*(int32_t*) &pending_in_buf[1]);
+      break;
+  }
+  return(ret_bytes);
+}
 
 // processes commands from cmd_buf and cmd_byte
 // slo mode indicates that commands which requre "slow" processing should be handled
@@ -438,9 +558,10 @@ uint8_t rescale_sgt(uint8_t in){
 // l|get stage length|5
 // s|get status byte|2
 // r|read back current position|5
-int handle_cmd(bool slo_mode){
-  int rdy_to_send = 0; // number of bytes ready to send
+/* int handle_cmd(void){
+  int msg_bytes = 0; // number of bytes a return message will have
   char this_cmd = cmd_byte;
+  cmd_byte = 0x00;
   int32_t pos = 0; // for storing position data
   switch (this_cmd){
     case 'g': // goto
@@ -467,14 +588,9 @@ int handle_cmd(bool slo_mode){
       break;
 
     case 'c': //comms check command
-      out_buf[0] = 'p'; // press p for pass
-      out_buf[1] = 0xCA;
-      out_buf[2] = 0XFE;
-      out_buf[3] = 0XBA;
-      out_buf[4] = 0XBE;
       cmd_byte = 0x00; // clear the cmd _byte. it has been handled
       //_delay_us(10000); // for testing to check if we miss the master's request for bytes with this
-      rdy_to_send = 5;
+      msg_bytes = 0;
       break;
 
     case 'h': // home command
@@ -608,7 +724,7 @@ int handle_cmd(bool slo_mode){
       rdy_to_send = 1;
   } // end switch
   return(rdy_to_send);
-}
+} */
 
 // waits for a move to complete and returns a reason for why it completed
 // -1 programming error. movement completed for unhandled reason
@@ -625,7 +741,7 @@ int wait_for_move(int32_t timeout_ms){ //timeout_ms defaults to MOVE_TIMEOUT
 
   // loop to wait for motion to begin
   do{
-    tmc5130_readInt(TMC5130, TMC5130_DRVSTATUS); // force update of the status byte
+    current_position = tmc5130_readInt(TMC5130, TMC5130_XACTUAL);  // force update of the status byte
     this_status = status;
     if (this_status & BIT3){ // bit 3 is for standstill
       NOP; // we're standing still
@@ -637,24 +753,24 @@ int wait_for_move(int32_t timeout_ms){ //timeout_ms defaults to MOVE_TIMEOUT
 
   // loop to wait for motion to end
   do{
-    tmc5130_readInt(TMC5130, TMC5130_DRVSTATUS); // force update of the status byte
+    current_position = tmc5130_readInt(TMC5130, TMC5130_XACTUAL);  // force update of the status byte
     this_status = status;
     if (this_status & BIT3){ // bit 3 is for standstill
       break; // we're standing still
     }
-    if (BIT_GET(ENN_PORT, ENN_BIT)){
+    if (BIT_GET(ENN_PORT, ENN_BIT)){  // check if motor power has been removed
       break;
     }
     elapsed = millis()-t0;
   } while( elapsed < timeout_ms);
 
-  if (BIT_GET(ENN_PORT, ENN_BIT)){
+  if (BIT_GET(ENN_PORT, ENN_BIT)){  // check if motor power has been removed
     ret_code = 3;
   } else if (elapsed >= timeout_ms){
     ret_code = 2;
   } else if (this_status & BIT5) {
     ret_code = 0;
-  } else if (this_status & BIT2) { // somehow this bit seems to always be set...
+  } else if (this_status & BIT2) {  // somehow this bit seems to always be set...
     ret_code = 1;
   }
   return(ret_code);
@@ -769,7 +885,7 @@ void tmc5130_readWriteArray(uint8_t channel, uint8_t *data, size_t length){
   BIT_CLEAR(SS_PORT, SS_BIT); // select salve  
   for(i=0; i<length; i++){
     SPDR1 = data[i];
-    while(!(SPSR1 & (1<<SPIF1)));
+    while(!(SPSR1 & (1<<SPIF1)));  // shift occurs here
     data[i] = SPDR1;
   }
   BIT_SET(SS_PORT, SS_BIT);  // deselect salve
@@ -822,30 +938,72 @@ int32_t tmc5130_readInt(uint8_t tmc5130, uint8_t address)
 void receiveEvent(int how_many){
   int i;
   if (how_many > 0){
-    cmd_byte = Wire.read();
-  }
-  for (i=1; (i<how_many) && (i<CMD_BUF_LEN); i++){
-    in_buf[i-1] = Wire.read();
-  }
-
-  // attempt to handle the command right in the ISR
-  bytes_ready = handle_cmd(false);
+    for (i=0; (i<how_many) && (i<CMD_BUF_LEN); i++){
+      in_buf[i] = Wire.read();
+    }
+    if (validate_message(i)) {
+      //  BIT_SET(PORTD, LED_PIN);
+      sequence_num = in_buf[i-3];
+      // most stuff can be handled in the ISR
+      bytes_in_out_buf = prep_response(do_isr_cmd(in_buf[0]));
+      if (in_buf[0] != 0x00){  // will need to handle in main
+        busy = true;  // set the busy flag because we'll need to do something in the main loop
+        // copy over the buffer for cosumption in main
+        memcpy(pending_in_buf, in_buf, sizeof(CMD_BUF_LEN));
+      }  // main loop processing check
+    }  // valid message check
+  }  // non-zero rx check
 }
 
 // fires off whenever when the master asks for bytes
 // is called from an ISR in the Wire library
-bool requestEvent(void){
-  send_later = false;
-  if (bytes_ready > 0){ // if we have something to send, send it right away
-    //send_later = false;
-    Wire.write((uint8_t*)out_buf, bytes_ready);
-    bytes_ready = 0;
-  } else { // no bytes ready
-    // we've been unable to respond to the master from the ISR
-    // we'll have to do it later, in the main loop
-    send_later = true; // this will trigger clock stretching
-    send_later_t0 = micros(); // record the time
-    // which will be ended by the call to Wire.flush() from the main loop
+void requestEvent(void){
+  if ((bytes_in_out_buf > 0)){
+    Wire.write((uint8_t*)out_buf, bytes_in_out_buf);
+    bytes_in_out_buf = 0;
   }
-  return(send_later);
+  //send_later = false;
+  //if (bytes_ready > 0){ // if we have something to send, send it right away
+  //  //send_later = false;
+  //  Wire.write((uint8_t*)out_buf, bytes_ready);
+  //  bytes_ready = 0;
+  //} else { // no bytes ready
+  //  // we've been unable to respond to the master from the ISR
+  //  // we'll have to do it later, in the main loop
+  //  send_later = true; // this will trigger clock stretching
+  //  send_later_t0 = micros(); // record the time
+  //  // which will be ended by the call to Wire.flush() from the main loop
+  //}
+  //return(send_later);
+}
+
+bool validate_message(int n_bytes){
+  bool ret = false;
+  int i;
+  uint16_t crc = 0xffff;  // crc starting value
+
+  for (i=0; i<n_bytes; i++){
+    crc = _crc_xmodem_update(crc, in_buf[i]);
+  }
+  if (crc == 0){
+    ret = true;
+  }
+  return(ret);
+}
+
+// gets run once per short while
+void do_every_short_while(void){
+#ifndef NO_LED
+    //toggle the alive LED pin
+    //NOP;
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+#else
+    NOP;
+#endif // NO_LED
+#ifdef DEBUG
+    if (Wire.getWireTimeoutFlag()){
+      Serial.println(F("We had a wire library timeout!"));
+      Wire.clearWireTimeoutFlag();
+    }
+#endif // DEBUG
 }

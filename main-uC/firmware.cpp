@@ -1,5 +1,5 @@
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 1
+#define VERSION_MINOR 2
 #define VERSION_PATCH 4
 #define BUILD c7a71f8
 // ====== start user editable config ======
@@ -15,7 +15,7 @@
 #define BIT_BANG_SPI
  
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
-//#define DEBUG
+#define DEBUG
 
 // when USE_SD is defined the we'll be ready to use the SD card
 //#define USE_SD
@@ -259,6 +259,12 @@ union Lb{
   byte the_bytes[4]; // byte representation of the number
 };
 
+// a "short buffer" union datatype
+union Sb{
+  int16_t the_number;
+  byte the_bytes[2]; // byte representation of the number
+};
+
 // error definitions
 #define NO_ERROR 0
 #define ERR_BAD_PIX -1 //pixel selection out of bounds
@@ -369,6 +375,7 @@ EthernetServer server(serverPort);
 
 // utility functions
 void do_every_long_while(void);
+void do_every_short_while(void);
 void report_firmware_version(EthernetClient);
 void send_prompt(EthernetClient);
 void get_cmd(char*, EthernetClient, int);
@@ -376,7 +383,8 @@ void command_handler(EthernetClient, String);
 void reset(void);
 
 // stage functions
-char stage_send_home(int);
+bool stage_send_cmd(int, unsigned int, unsigned int, bool);
+bool stage_send_home(int);
 void stage_get_len(EthernetClient, int);
 void stage_get_pos(EthernetClient, int);
 void stage_go_to(EthernetClient, int, int32_t);
@@ -450,7 +458,7 @@ void setup() {
 
   Wire.begin(); // for I2C
   // the wire module now times out and resets itsself to prevent lockups
-  Wire.setWireTimeoutUs(I2C_TIMEOUT_US, true);
+  Wire.setWireTimeout(I2C_TIMEOUT_US, true);
   Wire.setClock(I2C_FREQ); // (the default is 100000)
 
   // ============= ethernet setup ==============
@@ -560,32 +568,36 @@ volatile int32_t adcCounts;
 const int max_ethernet_clients = 8;
 EthernetClient clients[max_ethernet_clients];
 
-const int cmd_buf_len = 20;
+const int cmd_buf_len = 24;
 char cmd_buf[cmd_buf_len] = { 0x00 };
 String cmd = String("");
+
+// a buffer for communications with the stage
+const int stage_buf_len = 24;
+char stage_buf[stage_buf_len] = { 0x00 };
+volatile uint8_t stage_sequence_num;
 
 uint32_t tmp;
 char this_cmd;
 
 uint32_t loop_counter = 0ul;
-#ifndef NO_LED
-uint32_t led_blink_loops = 5000ul; // led changes state every this many loops
-#endif // NO_LED
 
-// one long while ~= 30 minutes (this might change if the main loop changes speed)
-uint32_t long_while_loops = 1200ul; 
+ // short while duration
+ //5000 ~= 1 second (this might change if the main loop changes speed)
+uint32_t short_while_loops = 5000ul;
+
+// long while duration
+// 6000000 ~= 30 minutes (this might change if the main loop changes speed)
+uint32_t long_while_loops = 6000000ul;
 
 // main program loop
 void loop() {
   loop_counter++;
   pixSetErr = ERR_GENERIC;
 
-#ifndef NO_LED
-  if (loop_counter%led_blink_loops == 0){
-    //toggle the alive LED pin
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+  if (loop_counter%short_while_loops == 0){
+    do_every_short_while();
   }
-#endif // NO_LED
   
   if (loop_counter%long_while_loops == 0){
     do_every_long_while();
@@ -681,10 +693,10 @@ void command_handler(EthernetClient c, String cmd){
   } else if (cmd.startsWith("h") && (cmd.length() == 2)){ //home request command
     int ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
-      char result = stage_send_home(ax);
-      if (result != 'p') {
-        c.print(F("ERROR "));
-        c.println(int(result));
+      if (!stage_send_home(ax)){
+        c.print(F("ERROR: Request to home axis "));
+        c.print(ax);
+        c.println(F(" was unsuccessful."));
       }
     } else {
       ERR_MSG
@@ -963,10 +975,27 @@ void easter_egg(void){
 
 // gets run once per long while
 void do_every_long_while(void){
-  #ifdef DEBUG
+#ifdef DEBUG
   Serial.println(F("Requesting DHCP renewal"));
-  #endif
+  Serial.println(loop_counter);
+#endif
   Ethernet.maintain(); // DHCP renewal
+}
+
+// gets run once per short while
+void do_every_short_while(void){
+#ifndef NO_LED
+    //toggle the alive LED pin
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+#else
+    NOP;
+#endif // NO_LED
+#ifdef DEBUG
+    if (Wire.getWireTimeoutFlag()){
+      D(Serial.println(F("We had a wire library timeout!")));
+      Wire.clearWireTimeoutFlag();
+    }
+#endif // DEBUG
 }
 
 // sends a prompt to the client
@@ -991,57 +1020,10 @@ uint8_t get_stages(void){
   return(stages);
 }
 
-// checks that a specific stage is connected
-bool stage_comms_check(int axis){
-  bool pass = false;
-  int addr;
-  int bytes_to_read;
-  uint8_t expected[5] = {'p', 0xca, 0xfe, 0xba, 0xbe};
-  uint8_t got[5] = {0x00};
-
-  if (axis >= 0 && axis <= 2){
-    addr = AXIS_ADDR[axis];
-    Wire.beginTransmission(addr);
-    if (Wire.write('c') == 1){  // sends instruction byte
-      if (Wire.endTransmission(false) == 0){
-        bytes_to_read = Wire.requestFrom(addr, 5, true);
-        if(bytes_to_read == 5){
-          got[0] = Wire.read();
-          got[1] = Wire.read();
-          got[2] = Wire.read();
-          got[3] = Wire.read();
-          got[4] = Wire.read();
-        }
-      }
-    }
-  }
-
-  if(0 == memcmp(expected, got, sizeof(got))){
-    pass = true;
-  }
-
-  return (pass);
-}
-
 // sends home command to an axis
-char stage_send_home(int axis){
-  char result = 'e';
-  int addr;
-  int bytes_to_read;
-
-  if (axis >= 0 && axis <= 2){
-    addr = AXIS_ADDR[axis];
-    Wire.beginTransmission(addr);
-    if (Wire.write('h') == 1){  // sends instruction byte
-      if (Wire.endTransmission(false) == 0){
-        bytes_to_read = Wire.requestFrom(addr, 1, true);
-        if(bytes_to_read == 1){
-          result =  Wire.read();
-        }
-      }
-    }
-  }
-  return(result);
+bool stage_send_home(int axis){
+  stage_buf[0] = 'h';
+  return(stage_send_cmd(axis, 1, 0, true));
 }
 
 // jogs stage in a direction
@@ -1144,38 +1126,14 @@ void stage_get_len(EthernetClient c, int axis){
   }
 }
 
-// reads back the stage position
 void stage_get_pos(EthernetClient c, int axis){
-  char result = 'e';
-  int addr;
-  int bytes_to_read;
-  int32_t pos = 0;
-  if (axis >= 0 && axis <= 2){
-    addr = AXIS_ADDR[axis];
-    Wire.beginTransmission(addr);
-    if (Wire.write('r') == 1){  // sends instruction byte
-      if (Wire.endTransmission(false) == 0){
-        bytes_to_read = Wire.requestFrom(addr, 5, true);
-        if(bytes_to_read == 5){
-          result =  Wire.read();
-          // TODO: see if i can use memcpy on both ends for this...
-          pos =  Wire.read();
-          pos =  pos << 8;
-          pos |=  Wire.read();
-          pos =  pos << 8;
-          pos |=  Wire.read();
-          pos =  pos << 8;
-          pos |=  Wire.read();
-        }
-      }
-    }
-  }
-
-  if (result != 'p') {
-      c.print(F("ERROR "));
-      c.println(int(result));
+  stage_buf[0] = 'r';
+  if (stage_send_cmd(axis, 1, 4, false)){
+    c.println(*(uint32_t*) &stage_buf[1]);
   } else {
-    c.println(pos);
+    c.print(F("ERROR: Failure reading axis "));
+    c.print(int(axis));
+    c.println(F(" position."));
   }
 }
 
@@ -1206,6 +1164,7 @@ void stage_go_to(EthernetClient c, int axis, int32_t position){
   }
 }
 
+
 // gets stage status byte
 void stage_status(EthernetClient c, int axis){
   char result = 'e';
@@ -1232,6 +1191,66 @@ void stage_status(EthernetClient c, int axis){
   } else {
     c.println(status, BIN);
   }
+}
+
+// transmits out_len bytes from stage_buf to a stage controller
+// then snapshots loop_counter to stage_sequence_num and transmits that
+// then transmits a crc16 over that message
+// then attempts to read a in_len byte long message from the slave
+// in_len does not include the two crc bytes, the ack byte or the sequence number byte
+// returns True if the stage controller understood the command and false otherwise
+bool stage_send_cmd(int axis, unsigned int out_len, unsigned int in_len, bool only_check_ack){
+  bool ret = false;
+  int addr;
+  unsigned int i;
+  Sb crc;
+  crc.the_number = 0xffff;  // crc starting value
+
+  if ((out_len <= (stage_buf_len - 3)) && (in_len <= (stage_buf_len - 4))){
+    for (i=0; i<out_len; i++){
+      crc.the_number = _crc_xmodem_update(crc.the_number, stage_buf[i]);
+    }
+    stage_sequence_num = loop_counter & 0xff;
+    stage_buf[i++] = stage_sequence_num;
+    crc.the_number = _crc_xmodem_update(crc.the_number, stage_sequence_num);
+    // append crc to message
+    stage_buf[i++] = crc.the_bytes[1];
+    stage_buf[i++] = crc.the_bytes[0];
+    if (axis >= 0 && axis <= 2){
+      addr = AXIS_ADDR[axis];
+      Wire.beginTransmission(addr);
+      if (Wire.write(stage_buf, out_len+3) == (out_len+3)){
+        if (Wire.endTransmission(false) == 0){
+          if(Wire.requestFrom(addr, in_len+4, true) == (in_len+4)){
+            // load the response bytes and compute their crc
+            crc.the_number = 0xffff;
+            for (i=0; i<(in_len+4);i++){
+              stage_buf[i] = Wire.read();
+              if(only_check_ack && (i==0) && (stage_buf[0] == 'p')){
+                ret = true;  // break out here if we only want the ack
+                break;
+              }
+              crc.the_number = _crc_xmodem_update(crc.the_number, stage_buf[i]);
+            }
+            if (crc.the_number == 0){
+              if ((uint8_t)stage_buf[i-3] == stage_sequence_num){
+                if (stage_buf[0] == 'p'){  // valid ack is the char 'p'
+                  ret = true;
+                }  // stage ack check
+              }  // sequence number check
+            }  // crc check
+          }  // return length check
+        }  // transmission success check
+      }  // transmission length check
+    }  // axis check
+  }  // buffer overflow check
+  return (ret);
+}
+
+// checks that a specific stage is connected
+bool stage_comms_check(int axis){
+  stage_buf[0] = 'c';
+  return(stage_send_cmd(axis, 1, 0, true));
 }
 
 // reads bytes from a client connection and puts them into buf until

@@ -9,7 +9,7 @@ print_usage(){
   echo "and device_port is the port to use to program the device."
   echo "not specifying a device_port only builds."
   echo "maybe you can find the right device_port in the output below:"
-  pio -v device list
+  pio device list
   exit -1
 }
 
