@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 2
-#define VERSION_PATCH 4
+#define VERSION_MINOR 4
+#define VERSION_PATCH 0
 #define BUILD c7a71f8
 // ====== start user editable config ======
 
@@ -15,7 +15,7 @@
 #define BIT_BANG_SPI
  
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
-#define DEBUG
+//#define DEBUG
 
 // when USE_SD is defined the we'll be ready to use the SD card
 //#define USE_SD
@@ -56,6 +56,7 @@ const unsigned char this_mac[6] = SNAITH_MAC;
 #endif//BIT_BANG_SPI
 //#include <FastCRC.h>
 #include <util/crc16.h>  // for _crc_xmodem_update
+#include <avr/wdt.h> /*Watchdog timer handling*/
 
 #include <Ethernet.h>
 // NOTE: the standard ethernet library uses a very conservative spi clock speed:
@@ -88,6 +89,7 @@ const char help_c_b[] PROGMEM = "\"cX\", checks that MUX X is connected. just \"
 const char help_e_a[] PROGMEM = "e";
 const char help_e_b[] PROGMEM = "\"eX\", checks that stage X is connected. just \"e\" returns a bitmask of connected stage controllers";
 
+#ifndef NO_STAGE
 const char help_h_a[] PROGMEM = "h";
 const char help_h_b[] PROGMEM = "\"hX\", homes axis X, just \"h\" homes all connected axes";
 
@@ -111,6 +113,16 @@ const char help_f_b[] PROGMEM = "\"fX\", puts axis X in freewheeling mode, just 
 
 const char help_i_a[] PROGMEM = "i";
 const char help_i_b[] PROGMEM = "\"iX\", gets the status byte for axis X, just \"i\" does so for all connected axes";
+
+const char help_w_a[] PROGMEM = "w";
+const char help_w_b[] PROGMEM = "\"wX\", gets the firmware version for axis X";
+
+const char help_t_a[] PROGMEM = "t";
+const char help_t_b[] PROGMEM = "\"tX\", resets the stage controller for axis X, just \"t\" does so for all connected axes";
+
+const char help_z_a[] PROGMEM = "z";
+const char help_z_b[] PROGMEM = "\"zX\", gets the reset reason byte for axis X";
+#endif
 
 #ifndef NO_RELAY_SHIELD
 const char help_eqe_a[] PROGMEM = "eqe";
@@ -153,6 +165,7 @@ const char* const help[] PROGMEM  = {
   help_s_a, help_s_b,
   help_c_a, help_c_b,
   help_e_a, help_e_b,
+#ifndef NO_STAGE
   help_h_a, help_h_b,
   help_j_a, help_j_b,
   help_l_a, help_l_b,
@@ -161,6 +174,10 @@ const char* const help[] PROGMEM  = {
   help_b_a, help_b_b,
   help_f_a, help_f_b,
   help_i_a, help_i_b,
+  help_w_a, help_w_b,
+  help_t_a, help_t_b,
+  help_z_a, help_z_b,
+#endif
 #ifndef NO_RELAY_SHIELD
   help_eqe_a, help_eqe_b,
   help_iv_a, help_iv_b,
@@ -235,7 +252,9 @@ Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 #define TCA9546_ADDRESS 0x70
 
 // stage controller I2C addresses
-const char AXIS_ADDR[3] = {0x50, 0x51, 0x52};
+const int N_MAX_AXIS = 3;
+const char AXIS_ADDR[N_MAX_AXIS] = {0x50, 0x51, 0x52};
+
 
 // otter relay addresses (the actual I2C addresses used are 0x40 | this value)
 //const char OMUX_ADDR[10] = {0x00, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
@@ -252,6 +271,17 @@ const char AXIS_ADDR[3] = {0x50, 0x51, 0x52};
 //OMUX_XXXX[7] -- > serves relay banks 3 and 4 on the        (3rd) relay board: substrates C3 & D3
 //OMUX_XXXX[8] -- > serves relay banks 1 and 2 on the top    (4th) relay board: substrates A4 & B4
 //OMUX_XXXX[9] -- > serves relay banks 3 and 4 on the top    (4th) relay board: substrates C4 & D4
+
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
+#define BYTE_TO_BINARY(byte)  \
+  (byte & 0x80 ? '1' : '0'), \
+  (byte & 0x40 ? '1' : '0'), \
+  (byte & 0x20 ? '1' : '0'), \
+  (byte & 0x10 ? '1' : '0'), \
+  (byte & 0x08 ? '1' : '0'), \
+  (byte & 0x04 ? '1' : '0'), \
+  (byte & 0x02 ? '1' : '0'), \
+  (byte & 0x01 ? '1' : '0') 
 
 // a "long buffer" union datatype
 union Lb{
@@ -345,10 +375,10 @@ const byte ip[] = STATIC_IP;
 #endif
 
 // bitmask for which port expander chips were discovered
-static uint32_t connected_devices = 0x00000000;
+uint32_t connected_devices = 0x00000000;
 
 // bitmask for which stages were discovered
-static uint8_t connected_stages = 0x00;
+uint8_t connected_stages = 0x00;
 
 #ifndef BIT_BANG_SPI
 SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
@@ -371,29 +401,70 @@ EthernetServer server(serverPort);
 
 //FastCRC16 CRC16;
 
+// The following bits are OPTIBOOT stuff to allow us to know what MCUSR
+// had before the bootloader wiped it out
+/*
+   First, we need a variable to hold the reset cause that can be written before
+   early sketch initialization (that might change r2), and won't be reset by the
+   various initialization code.
+   avr-gcc provides for this via the ".noinit" section.
+*/
+uint8_t resetFlag __attribute__ ((section(".noinit")));
+
+/*
+   Next, we need to put some code to save reset cause from the bootload (in r2)
+   to the variable.  Again, avr-gcc provides special code sections for this.
+   If compiled with link time optimization (-flto), as done by the Arduno
+   IDE version 1.6 and higher, we need the "used" attribute to prevent this
+   from being omitted.
+*/
+void resetFlagsInit(void) __attribute__ ((naked))
+__attribute__ ((used))
+__attribute__ ((section (".init0")));
+void resetFlagsInit(void)
+{
+  /*
+     save the reset flags passed from the bootloader
+     This is a "simple" matter of storing (STS) r2 in the special variable
+     that we have created.  We use assembler to access the right variable.
+  */
+  __asm__ __volatile__ ("sts %0, r2\n" : "=m" (resetFlag) :);
+}
+
 // declare functions TODO: move to header file
 
 // utility functions
+void easter_egg(EthernetClient);
 void do_every_long_while(void);
 void do_every_short_while(void);
 void report_firmware_version(EthernetClient);
+void report_reset_flags(EthernetClient);
 void send_prompt(EthernetClient);
 void get_cmd(char*, EthernetClient, int);
 void command_handler(EthernetClient, String);
 void reset(void);
+void reset_reason(void);
 
 // stage functions
 bool stage_send_cmd(int, unsigned int, unsigned int, bool);
+bool stage_blind_read(int, unsigned int, bool);
 bool stage_send_home(int);
 void stage_get_len(EthernetClient, int);
 void stage_get_pos(EthernetClient, int);
 void stage_go_to(EthernetClient, int, int32_t);
 void stage_status(EthernetClient, int);
-char stage_freewheel(int);
-char stage_powerdown(int);
+void stage_reset_reason(EthernetClient, int);
+bool stage_freewheel(int);
+bool stage_powerdown(int);
 uint8_t get_stages(void);
 bool stage_comms_check(int);
-char stage_jog(int, char);
+bool stage_jog_a(int);
+bool stage_jog_b(int);
+void stage_get_fw(EthernetClient c, int);
+void stage_reset(int);
+bool stage_read_reg(int, uint8_t);
+bool stage_write_reg(int, uint8_t, int32_t);
+
 
 // port expander functions
 void tca9546_write(uint8_t, bool, bool, bool, bool);
@@ -417,17 +488,22 @@ uint8_t ads_read(bool, uint8_t);
 uint8_t ads_start_sync(bool);
 int32_t ads_get_data(bool);
 
-// misc
-void easter_egg(void);
-
 void setup() {
   D(Serial.begin(115200)); // serial port for debugging
   D(Serial.println(F("________Begin Setup Function________")));
 
+#ifndef NO_LED
+  pinMode(LED_PIN, OUTPUT); // to show we are working
+  //pinMode(LED2_PIN, OUTPUT);
+#endif
+
+  reset_reason();
+
+  // set watchdog timer for 8 seconds
+  wdt_enable(WDTO_8S);
 
   digitalWrite(SD_SPI_CS, HIGH); //deselect
   pinMode(SD_SPI_CS, OUTPUT);
-
 
 #ifndef NO_RELAY_SHIELD
   //digitalWrite(RELAY1_PIN, LOW); //open
@@ -527,11 +603,6 @@ void setup() {
     SD.remove(F(STREAM_FILE)); // delete the testing file
   } // SD card setup
 #endif // USE_SD
-  
-#ifndef NO_LED
-  pinMode(LED_PIN, OUTPUT); // to show we are working
-  //pinMode(LED2_PIN, OUTPUT);
-#endif
 
 #ifndef NO_ADC
   // ============= ADC setup ============== 
@@ -560,10 +631,11 @@ void setup() {
   D(Serial.println(F("________End Setup Function________")));
 }
 
-// define some various varibles we'll use in the loop
+// globals for mcp
 volatile uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
+  
+
 volatile int pixSetErr = ERR_GENERIC;
-volatile int32_t adcCounts;
 
 const int max_ethernet_clients = 8;
 EthernetClient clients[max_ethernet_clients];
@@ -590,6 +662,10 @@ uint32_t short_while_loops = 5000ul;
 // 6000000 ~= 30 minutes (this might change if the main loop changes speed)
 uint32_t long_while_loops = 6000000ul;
 
+// client index
+int ci;
+char reset_flag_str[16];
+
 // main program loop
 void loop() {
   loop_counter++;
@@ -607,13 +683,15 @@ void loop() {
   EthernetClient new_client = server.accept();
   
   if (new_client) {
-    for (int i = 0; i < max_ethernet_clients; i++) {
-      if (!clients[i]) {
+    for (ci = 0; ci < max_ethernet_clients; ci++) {
+      if (!clients[ci]) {
         new_client.print(F("You are Client Number "));
-        new_client.print(i);
+        new_client.print(ci);
         new_client.println('.');
         new_client.print(F("I am Firmware Version: "));
         report_firmware_version(new_client);
+        new_client.print(F("resetFlags are: "));
+        report_reset_flags(new_client);
         new_client.print(F("I have Stage bitmask = "));
         new_client.print(connected_stages);
         new_client.println(',');
@@ -632,9 +710,9 @@ void loop() {
         send_prompt(new_client);
         // Once we "accept", the client is no longer tracked by EthernetServer
         // so we must store it into our list of clients
-        clients[i] = new_client;
+        clients[ci] = new_client;
         break;
-      } else if (i == max_ethernet_clients -1) {
+      } else if (ci == max_ethernet_clients -1) {
         new_client.print(F("ERROR: Maximum client limit reached. Can not accept new connection. Goodbye."));
         new_client.stop();
       }
@@ -642,46 +720,138 @@ void loop() {
   } // end new client connection if
 
   // handle message from any client
-  for (int j = 0; j < max_ethernet_clients; j++) {
-    while (clients[j] && clients[j].available() > 0) {
-      get_cmd(cmd_buf, clients[j], cmd_buf_len);
+  for (ci = 0; ci < max_ethernet_clients; ci++) {
+    while (clients[ci] && clients[ci].available() > 0) {
+      get_cmd(cmd_buf, clients[ci], cmd_buf_len);
       cmd = String((char*)cmd_buf);
       //cmd = c.readStringUntil(CMD_TERMINATOR);
       cmd.toLowerCase(); //case insensative
-      //clients[j].println(F(""));
+      //clients[ci].println(F(""));
 
       // handle command
-      command_handler(clients[j], cmd);
-      send_prompt(clients[j]); // send prompt indicating that the command has been handled
+      command_handler(clients[ci], cmd);
+      send_prompt(clients[ci]); // send prompt indicating that the command has been handled
     }
   }
   
   // stop any clients which disconnect
-  for (int i = 0; i < max_ethernet_clients; i++) {
-    if (clients[i] && !clients[i].connected()) {
-      clients[i].print(F("Goodbye Client Number "));
-      clients[i].print(i);
-      clients[i].println(F("."));
-      clients[i].stop();
+  for (ci = 0; ci < max_ethernet_clients; ci++) {
+    if (clients[ci] && !clients[ci].connected()) {
+      clients[ci].print(F("Goodbye Client Number "));
+      clients[ci].print(ci);
+      clients[ci].println(F("."));
+      clients[ci].stop();
     }
   } // end client disconnection check
 } // end main program loop
 
-// resets the microcontroller
+/*
+// client index
+int ci;
+
+// main program loop
+void loop() {
+  loop_counter++;
+  pixSetErr = ERR_GENERIC;
+
+  if (loop_counter%short_while_loops == 0){
+    do_every_short_while();
+  }
+  
+  if (loop_counter%long_while_loops == 0){
+    do_every_long_while();
+  }
+
+  // wait for a new client:
+  EthernetClient new_client = server.accept();
+  
+  if (new_client) {
+    for (ci = 0; ci < max_ethernet_clients; ci++) {
+      if (!clients[ci]) {
+        new_client.print(F("You are Client Number "));
+        new_client.print(ci);
+        new_client.println('.');
+        new_client.print(F("I am Firmware Version: "));
+        report_firmware_version(new_client);
+        new_client.print(F("resetFlags are: "));
+        // this only works with optiboot...
+        sprintf(stage_buf, BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(resetFlag));
+        new_client.println(stage_buf);
+        stage_buf[0] = 0x00;
+        new_client.print(F("I have Stage bitmask = "));
+        new_client.print(connected_stages);
+        new_client.println(',');
+        new_client.print(F("and MUX bitmask = "));
+        new_client.print(connected_devices);
+        new_client.println('.');
+        //new_client.println(F("Enter ? for help."));
+
+        delay(10);  // connection garbage collection time
+        //new_client.flush();  // throw away any startup garbage bytes
+        while (new_client.available()){
+          new_client.read(); // throw away any startup garbage bytes
+        }
+        new_client.setTimeout(5000); //give the client 5 seconds to send a terminator to end the command
+
+        send_prompt(new_client);
+        // Once we "accept", the client is no longer tracked by EthernetServer
+        // so we must store it into our list of clients
+        clients[ci] = new_client;
+        break;
+      } else if (ci == max_ethernet_clients -1) {
+        new_client.print(F("ERROR: Maximum client limit reached. Can not accept new connection. Goodbye."));
+        new_client.stop();
+      }
+    } // new client search for loop
+  } // end new client connection if
+
+  // handle message from any client
+  for (ci = 0; ci < max_ethernet_clients; ci++) {
+    while (clients[ci] && clients[ci].available() > 0) {
+      get_cmd(cmd_buf, clients[ci], cmd_buf_len);
+      cmd = String((char*)cmd_buf);
+      //cmd = c.readStringUntil(CMD_TERMINATOR);
+      cmd.toLowerCase(); //case insensative
+      //clients[ci].println(F(""));
+
+      // handle command
+      command_handler(clients[ci], cmd);
+      send_prompt(clients[ci]); // send prompt indicating that the command has been handled
+    }
+  }
+  
+  // stop any clients which disconnect
+  for (ci = 0; ci < max_ethernet_clients; ci++) {
+    if (clients[ci] && !clients[ci].connected()) {
+      clients[ci].print(F("Goodbye Client Number "));
+      clients[ci].print(ci);
+      clients[ci].println(F("."));
+      clients[ci].stop();
+    }
+  } // end client disconnection check
+} // end main program loop
+
+*/
+
+// asks the dog to reset the uc (takes 15ms)
 void reset(void) {
-  asm volatile ("jmp 0");
+  wdt_enable(WDTO_15MS);
+  while(true);
 }
 
 // does an action based on command string from client
 void command_handler(EthernetClient c, String cmd){
+  int i;
+  char dir;
+  int ax;
+  uint8_t pd;
+  uint8_t substrate;
+  int chan;
+
   if (cmd.equals("")){ //ignore empty command
     NOP;
   } else if (cmd.equals("v")){ //version request command
     report_firmware_version(c);
-  } else if (cmd.equals("h")){ // home all stages
-    for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
-      stage_send_home(i);
-    }
 #ifndef NO_RELAY_SHIELD
   } else if (cmd.equals("iv")){ //switch relays to sourcemeter (needs to be before the iX command)
     digitalWrite(RELAY3_PIN, LOW);
@@ -690,8 +860,13 @@ void command_handler(EthernetClient c, String cmd){
     digitalWrite(RELAY3_PIN, HIGH);
     digitalWrite(RELAY4_PIN, HIGH);
 #endif
+#ifndef NO_STAGE
+  } else if (cmd.equals("h")){ // home all stages
+    for (i=0; i<N_MAX_AXIS; i++){
+      stage_send_home(i);
+    }
   } else if (cmd.startsWith("h") && (cmd.length() == 2)){ //home request command
-    int ax = cmd.charAt(1) - '1';
+    ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
       if (!stage_send_home(ax)){
         c.print(F("ERROR: Request to home axis "));
@@ -702,38 +877,129 @@ void command_handler(EthernetClient c, String cmd){
       ERR_MSG
     }
   } else if (cmd.startsWith("l") && (cmd.length() == 2)){ //stage length request
-    int ax = cmd.charAt(1) - '1';
+    ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
         stage_get_len(c, ax);
     } else {
       ERR_MSG
     }
   } else if (cmd.startsWith("r") && (cmd.length() == 2)){ //read back stage pos
-    int ax = cmd.charAt(1) - '1';
+    ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
         stage_get_pos(c, ax);
     } else {
       ERR_MSG
     }
-  } else if (cmd.startsWith("j") && (cmd.length() == 3)){ //jog command
-    int ax = cmd.charAt(1) - '1';
-    char dir = cmd.charAt(2);
+  } else if (cmd.startsWith("w") && (cmd.length() == 2)){ //read back stage fw ver
+    ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
-      char result = stage_jog(ax, dir);
-      if (result != 'p') {
-        c.print(F("ERROR "));
-        c.println(int(result));
+        stage_get_fw(c, ax);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.equals("t")){ // reset all stages
+    for (i=0; i<N_MAX_AXIS; i++){
+      stage_reset(i);
+    }
+  } else if (cmd.startsWith("t") && (cmd.length() == 2)){ //reset stage uc
+    ax = cmd.charAt(1) - '1';
+    if ((ax >= 0) && (ax <= 2)){
+        stage_reset(ax);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.startsWith("j") && (cmd.length() == 3)){ //jog command
+    ax = cmd.charAt(1) - '1';
+    dir = cmd.charAt(2);
+    if ((ax >= 0) && (ax <= 2)){
+      if (dir == 'a'){
+        if (!stage_jog_a(ax)){
+          c.print(F("ERROR: Request to jog axis "));
+          c.print(ax);
+          c.println(F(" in direction a was unsuccessful."));
+        }
+      } else if (dir == 'b'){
+          if (!stage_jog_b(ax)){
+            c.print(F("ERROR: Request to jog axis "));
+            c.print(ax);
+            c.println(F(" in direction b was unsuccessful."));
+        }
+      } else {
+        ERR_MSG
       }
     } else {
       ERR_MSG
     }
   } else if (cmd.startsWith("g") && (cmd.length() > 2)){ //send the stage somewhere
-    int ax = cmd.charAt(1) - '1';
+    ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
         stage_go_to(c, ax, cmd.substring(2).toInt());
     } else {
       ERR_MSG
     }
+  } else if (cmd.equals("e")) { // get stage connected mask command
+    connected_stages = get_stages();
+    c.println(connected_stages);
+  } else if (cmd.startsWith("e") && ((cmd.length() == 2))){ //stage check command
+    ax = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
+    if ((ax >= 0) && (ax <= 2)){
+      if (!stage_comms_check(ax)){
+        c.print(F("Stage "));
+        c.print(ax);
+        c.println(F(" not found."));
+      }
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.equals("b")) { //power off all stages
+    for (i=0; i<N_MAX_AXIS; i++){
+      stage_powerdown(i);
+    }
+  } else if (cmd.startsWith("b") && ((cmd.length() == 2))){ //power off a single stage
+    ax = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
+    if ((ax >= 0) && (ax <= 2)){
+      if (!stage_powerdown(ax)){
+        c.print(F("ERROR: Request to power off axis "));
+        c.print(ax);
+        c.println(F(" was unsuccessful."));
+      }
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.equals("i")) { //stage status byte command
+    for (i=0; i<N_MAX_AXIS; i++){
+      stage_status(c, i);
+    }
+  } else if (cmd.startsWith("i") && ((cmd.length() == 2))){ //stage status byte command
+    ax = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
+    if ((ax >= 0) && (ax <= 2)){
+      stage_status(c, ax);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.startsWith("z") && ((cmd.length() == 2))){ //stage status byte command
+    ax = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
+    if ((ax >= 0) && (ax <= 2)){
+      stage_reset_reason(c, ax);
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.equals("f")) { //freewheel all stages
+    for (i=0; i<N_MAX_AXIS; i++){
+      stage_freewheel(i);
+    }
+  } else if (cmd.startsWith("f") && ((cmd.length() == 2))){ //freewheel a single stage
+    ax = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
+    if ((ax >= 0) && (ax <= 2)){
+      if (!stage_freewheel(ax)){
+        c.print(F("ERROR: Request to freewheel axis "));
+        c.print(ax);
+        c.println(F(" was unsuccessful."));
+      }
+    } else {
+      ERR_MSG
+    }
+#endif // no stage
 #ifndef NO_ADC
   } else if (cmd.equals("a")){ //analog voltage supply span command
     c.print(F("Analog voltage span as read by U2 (current adc): "));
@@ -757,71 +1023,18 @@ void command_handler(EthernetClient c, String cmd){
     }
 #ifndef NO_ADC
   } else if (cmd.startsWith("p") && (cmd.length() == 2)){ //photodiode measure command
-    uint8_t pd = cmd.charAt(1) - '0';
+    pd = cmd.charAt(1) - '0';
     if ((pd == 1) || (pd == 2)){
         c.println(ads_get_single_ended(true,pd+1));
     } else {
       ERR_MSG
     }
 #endif // NO_ADC
-  } else if (cmd.equals("e")) { // get stage connected mask command
-    connected_stages = get_stages();
-    c.println(connected_stages);
-  } else if (cmd.startsWith("e") && ((cmd.length() == 2))){ //stage check command
-    uint8_t stage = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
-    if ((stage >= 0) && (stage <= 2)){
-      if (!stage_comms_check(stage)){
-        c.println(F("stage not found"));
-      }
-    } else {
-      ERR_MSG
-    }
-  } else if (cmd.equals("b")) { //power off all stages
-    for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
-      stage_powerdown(i);
-    }
-  } else if (cmd.startsWith("b") && ((cmd.length() == 2))){ //power off a single stage
-    uint8_t stage = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
-    if ((stage >= 0) && (stage <= 2)){
-      char result = stage_powerdown(stage);
-      if (result != 'p') {
-        c.print(F("ERROR "));
-        c.println(int(result));
-      }
-    } else {
-      ERR_MSG
-    }
-  } else if (cmd.equals("i")) { //stage status byte command
-    for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
-      stage_status(c,i);
-    }
-  } else if (cmd.startsWith("i") && ((cmd.length() == 2))){ //stage status byte command
-    uint8_t stage = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
-    if ((stage >= 0) && (stage <= 2)){
-      stage_status(c, stage);
-    } else {
-      ERR_MSG
-    }
-  } else if (cmd.equals("f")) { //freewheel all stages
-    for (unsigned int i=0; i<sizeof(AXIS_ADDR); i++){
-      stage_freewheel(i);
-    }
-  } else if (cmd.startsWith("f") && ((cmd.length() == 2))){ //freewheel a single stage
-    uint8_t stage = cmd.charAt(1) - '1'; //convert '1', '2', '3'... to 0, 1, 2...
-    if ((stage >= 0) && (stage <= 2)){
-      char result = stage_freewheel(stage);
-      if (result != 'p') {
-        c.print(F("ERROR "));
-        c.println(int(result));
-      }
-    } else {
-      ERR_MSG
-    }
   } else if (cmd.equals("c")){
     connected_devices = mcp_setup(MCP_SPI);
     c.println(connected_devices);
   } else if (cmd.startsWith("c") && ((cmd.length() == 2))){ //mux check command
-    uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+    substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
     if ((substrate >= 0) && (substrate <= 9)){
       if (!mcp_check(MCP_SPI, substrate)){
         c.println(F("MUX not found"));
@@ -831,7 +1044,7 @@ void command_handler(EthernetClient c, String cmd){
     }
 #ifndef NO_ADC
   } else if (cmd.startsWith("d") && (cmd.length() == 2)){ //pogo pin board sense divider measure command
-    uint8_t substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+    substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
     if ((substrate >= 0) && (substrate <= 7)){
       mcp_dev_addr = substrate;
 
@@ -853,7 +1066,7 @@ void command_handler(EthernetClient c, String cmd){
     }
   } else if (cmd.startsWith("adc")){ // adc read command
     if (cmd.length() == 3){ //list all of the channels' counts
-      for(int i=0; i<=7; i++){
+      for(i=0; i<=7; i++){
         if ((i >= 0) && (i <= 3)){
           c.print(F("AIN"));
           c.print(i);
@@ -874,7 +1087,7 @@ void command_handler(EthernetClient c, String cmd){
         }
       }
     } else if (cmd.length() == 4){
-      int chan = cmd.charAt(3) - '0'; // 0-3 are mapped to U2's (current adc) chans AIN0-3, 4-7 are mapped to U5's (voltage adc) chans AIN0-3
+      chan = cmd.charAt(3) - '0'; // 0-3 are mapped to U2's (current adc) chans AIN0-3, 4-7 are mapped to U5's (voltage adc) chans AIN0-3
       if ((chan >= 0) && (chan <= 3)){  
         c.print(F("AIN"));
         c.print(chan);
@@ -911,13 +1124,13 @@ void command_handler(EthernetClient c, String cmd){
 #endif //NO_ADC
   } else if (cmd.equals("?") || cmd.equals("help")){ //help request command
     c.println(F("__Supported Commands__"));
-    for(int i=0; i<nCommands;i++){
+    for(i=0; i<nCommands;i++){
       c.print(PGM2STR(help, 2*i));
       c.print(F(": "));
       c.println(PGM2STR(help, 2*i+1));
     }
   } else if (cmd.equals(F("!gr"))){ 
-    easter_egg();
+    easter_egg(c);
   } else if (cmd.equals(F("reset")) || cmd.equals(F("reboot")) || cmd.equals(F("restart"))){
     c.stop();
     delay(100);
@@ -929,7 +1142,23 @@ void command_handler(EthernetClient c, String cmd){
   }
 }
 
-void easter_egg(void){
+void easter_egg(EthernetClient c){
+  uint32_t value;
+  uint8_t address;
+
+  address = 0x12;  // TSTEP
+  address = 0x39;  // encoder value
+  stage_write_reg(2, address, 3456);
+  if (stage_read_reg(2, address)){
+    memcpy(&value, stage_buf, 4);
+    c.print(F("Register 0x"));
+    c.print(address, HEX);
+    c.print(F(" is: 0x"));
+    c.print(value, HEX);
+    c.print(F(" (that's "));
+    c.print(value);
+    c.println(F(" dec)"));
+  }
 /*   
   bool spi = false;
   uint32_t expanders = 0x00000000;
@@ -984,11 +1213,10 @@ void do_every_long_while(void){
 
 // gets run once per short while
 void do_every_short_while(void){
+  wdt_reset();  // pet the dog
 #ifndef NO_LED
     //toggle the alive LED pin
     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-#else
-    NOP;
 #endif // NO_LED
 #ifdef DEBUG
     if (Wire.getWireTimeoutFlag()){
@@ -1008,11 +1236,18 @@ void report_firmware_version(EthernetClient c){
   c.println(FIRMWARE_VER);
 }
 
+void report_reset_flags(EthernetClient c){
+  char flag_string[16];
+  // this only works with optiboot...
+  sprintf(flag_string, BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(resetFlag));
+  c.println(flag_string);
+}
+
 // returns bitmask of connected stages
 uint8_t get_stages(void){
   uint8_t stages = 0x00;
   unsigned int i;
-  for (i=0; i<sizeof(AXIS_ADDR); i++){
+  for (i=0; i<N_MAX_AXIS; i++){
     if (stage_comms_check(i)){
       stages |= (0x01<<i);
     }
@@ -1026,106 +1261,61 @@ bool stage_send_home(int axis){
   return(stage_send_cmd(axis, 1, 0, true));
 }
 
-// jogs stage in a direction
-char stage_jog(int axis, char dir){
-  char result = 'e';
-  int addr;
-  int bytes_to_read;
+// jogs stage in direction a
+bool stage_jog_a(int axis){
+  stage_buf[0] = 'a';
+  return(stage_send_cmd(axis, 1, 0, true));
+}
 
-  if ((dir == 'a') || (dir == 'b')){
-    if ((axis >= 0) && (axis <= 2)){
-      addr = AXIS_ADDR[axis];
-      Wire.beginTransmission(addr);
-      if (Wire.write(dir) == 1){  // sends instruction byte (either a or b)
-        if (Wire.endTransmission(false) == 0){
-          bytes_to_read = Wire.requestFrom(addr, 1, true);
-          if(bytes_to_read == 1){
-            result =  Wire.read();
-          }
-        }
-      }
-    }
-  }
-  return(result);
+// jogs stage in a direction b
+bool stage_jog_b(int axis){
+  stage_buf[0] = 'b';
+  return(stage_send_cmd(axis, 1, 0, true));
 }
 
 // sends powerdown command to an axis
-char stage_powerdown(int axis){
-  char result = 'e';
-  int addr;
-  int bytes_to_read;
-
-  if (axis >= 0 && axis <= 2){
-    addr = AXIS_ADDR[axis];
-    Wire.beginTransmission(addr);
-    if (Wire.write('d') == 1){  // sends instruction byte
-      if (Wire.endTransmission(false) == 0){
-        bytes_to_read = Wire.requestFrom(addr, 1, true);
-        if(bytes_to_read == 1){
-          result =  Wire.read();
-        }
-      }
-    }
-  }
-  return(result);
+bool stage_powerdown(int axis){
+  stage_buf[0] = 'd';
+  return(stage_send_cmd(axis, 1, 0, true));
 }
 
 // sends freewheel command to an axis
-char stage_freewheel(int axis){
-  char result = 'e';
-  int addr;
-  int bytes_to_read;
+bool stage_freewheel(int axis){
+  stage_buf[0] = 'f';
+  return(stage_send_cmd(axis, 1, 0, true));
+}
 
-  if (axis >= 0 && axis <= 2){
-    addr = AXIS_ADDR[axis];
-    Wire.beginTransmission(addr);
-    if (Wire.write('f') == 1){  // sends instruction byte
-      if (Wire.endTransmission(false) == 0){
-        bytes_to_read = Wire.requestFrom(addr, 1, true);
-        if(bytes_to_read == 1){
-          result =  Wire.read();
-        }
-      }
-    }
-  }
-  return(result);
+// resets a stage microcontroller
+void stage_reset(int axis){
+  stage_buf[0] = 't';
+  stage_send_cmd(axis, 1, 0, true);
 }
 
 // gets the length of an axis
 void stage_get_len(EthernetClient c, int axis){
-  char result = 'e'; 
-  int addr;
-  int bytes_to_read;
-  int32_t length = 0;
-  if (axis >= 0 && axis <= 2){
-    addr = AXIS_ADDR[axis];
-    Wire.beginTransmission(addr);
-    if (Wire.write('l') == 1){  // sends instruction byte
-      if (Wire.endTransmission(false) == 0){
-        bytes_to_read = Wire.requestFrom(addr, 5, true);
-        if(bytes_to_read == 5){
-          result =  Wire.read();
-          // TODO: see if i can use memcpy on both ends for this...
-          length =  Wire.read();
-          length =  length << 8;
-          length |=  Wire.read();
-          length =  length << 8;
-          length |=  Wire.read();
-          length =  length << 8;
-          length |=  Wire.read();
-        }
-      }
-    }
-  }
-
-  if (result != 'p') {
-    c.print(F("ERROR "));
-    c.println(int(result));
+  stage_buf[0] = 'l';
+  if (stage_send_cmd(axis, 1, 4, false)){
+    c.println(*(int32_t*) &stage_buf[1]);
   } else {
-    c.println(length);
+    c.print(F("ERROR: Failure reading axis "));
+    c.print(int(axis));
+    c.println(F(" length."));
   }
 }
 
+// gets the firmware version of the driver
+void stage_get_fw(EthernetClient c, int axis){
+  stage_buf[0] = 'v';
+  if (stage_send_cmd(axis, 1, 14, false)){
+    c.println((char*) &stage_buf[1]);
+  } else {
+    c.print(F("ERROR: Failure reading axis "));
+    c.print(int(axis));
+    c.println(F(" version."));
+  }
+}
+
+// gets the current position in steps
 void stage_get_pos(EthernetClient c, int axis){
   stage_buf[0] = 'r';
   if (stage_send_cmd(axis, 1, 4, false)){
@@ -1137,68 +1327,87 @@ void stage_get_pos(EthernetClient c, int axis){
   }
 }
 
-// sends the stage somewhere
-void stage_go_to(EthernetClient c, int axis, int32_t position){
-  char result = 'e';
-  int addr;
-  int bytes_to_read;
-  Lb lb; //our int32_t buffer
-  lb.the_number = position; // copy in the requested position
-  if (axis >= 0 && axis <= 2){
-    addr = AXIS_ADDR[axis];
-    Wire.beginTransmission(addr);
-    if (Wire.write('g') == 1){  // sends instruction byte
-      Wire.write(lb.the_bytes,4); // sends the position bytes
-      if (Wire.endTransmission(false) == 0){
-        bytes_to_read = Wire.requestFrom(addr, 1, true);
-        if(bytes_to_read == 1){
-          result =  Wire.read();
-        }
-      }
-    }
-  }
+// reads a stage driver register
+// true if the result is ready in stage_buf
+bool stage_read_reg(int axis, uint8_t address){
+  int retries = 10;
+  bool ret = false;
+  stage_buf[0] = 'i';
+  stage_buf[1] = address;
+  if (stage_send_cmd(axis, 2, 0, true)){
+    while((retries--) > 0){
+      if (stage_blind_read(axis, 4, false)){
+        ret = true;
+        break;
+      }  // retry check
+      delay(20);  // give the salve a chance to answer
+    }  // retry check
+  }  // request good check
+  return (ret);
+}
 
-  if (result != 'p') {
-      c.print(F("ERROR "));
-      c.println(int(result));
+// gets the stage status byte
+void stage_go_to(EthernetClient c, int axis, int32_t position){
+  stage_buf[0] = 'g';
+  memcpy(&stage_buf[1], &position, 4);
+  if (!stage_send_cmd(axis, 5, 0, true)){
+    c.print(F("ERROR: Failure sending axis "));
+    c.print(int(axis));
+    c.print(F(" to "));
+    c.print(position);
+    c.println(F("."));
   }
 }
 
+// writes a stage driver register returns true if the slave accepted our request
+bool stage_write_reg(int axis, uint8_t address, int32_t value){
+  int retries = 10;
+  bool ret = false;
+  stage_buf[0] = 'w';
+  stage_buf[1] = address;
+  memcpy(&stage_buf[2], &value, 4);
+  if (stage_send_cmd(axis, 6, 0, true)){
+    ret = true;
+  }  // request good check
+  return (ret);
+}
 
-// gets stage status byte
+// gets the stage status byte
 void stage_status(EthernetClient c, int axis){
-  char result = 'e';
-  int addr;
-  int bytes_to_read;
-  uint8_t status = 0;
-  if (axis >= 0 && axis <= 2){
-    addr = AXIS_ADDR[axis];
-    Wire.beginTransmission(addr);
-    if (Wire.write('s') == 1){  // sends instruction byte
-      if (Wire.endTransmission(false) == 0){
-        bytes_to_read = Wire.requestFrom(addr, 2, true);
-        if(bytes_to_read == 2){
-          result = Wire.read();
-          status = Wire.read();
-        }
-      }
-    }
-  }
-
-  if (result != 'p') {
-    c.print(F("ERROR "));
-    c.println(int(result));
+  char pbuf[16];
+  stage_buf[0] = 's';
+  if (stage_send_cmd(axis, 1, 1, false)){
+    sprintf(pbuf, BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(stage_buf[1]));
+    c.println(pbuf);
   } else {
-    c.println(status, BIN);
+    c.print(F("ERROR: Failure reading axis "));
+    c.print(int(axis));
+    c.println(F(" status byte."));
+  }
+}
+
+// gets the stage reset reason byte (MCUSR)
+void stage_reset_reason(EthernetClient c, int axis){
+  char pbuf[16];
+  stage_buf[0] = 'e';
+  if (stage_send_cmd(axis, 1, 1, false)){
+    sprintf(pbuf, BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(stage_buf[1]));
+    c.println(pbuf);
+  } else {
+    c.print(F("ERROR: Failure reading axis "));
+    c.print(int(axis));
+    c.println(F(" reset reason byte."));
   }
 }
 
 // transmits out_len bytes from stage_buf to a stage controller
 // then snapshots loop_counter to stage_sequence_num and transmits that
 // then transmits a crc16 over that message
-// then attempts to read a in_len byte long message from the slave
+// then attempts to read an in_len byte long message from the slave
 // in_len does not include the two crc bytes, the ack byte or the sequence number byte
-// returns True if the stage controller understood the command and false otherwise
+// returns True if the stage controller understood the command and any return bytes
+// from the slave are crc and sequence number checked and ready to read
+// starting at stage_buf[1] if you aren't interested in the ack byte
 bool stage_send_cmd(int axis, unsigned int out_len, unsigned int in_len, bool only_check_ack){
   bool ret = false;
   int addr;
@@ -1207,16 +1416,16 @@ bool stage_send_cmd(int axis, unsigned int out_len, unsigned int in_len, bool on
   crc.the_number = 0xffff;  // crc starting value
 
   if ((out_len <= (stage_buf_len - 3)) && (in_len <= (stage_buf_len - 4))){
-    for (i=0; i<out_len; i++){
-      crc.the_number = _crc_xmodem_update(crc.the_number, stage_buf[i]);
-    }
-    stage_sequence_num = loop_counter & 0xff;
-    stage_buf[i++] = stage_sequence_num;
-    crc.the_number = _crc_xmodem_update(crc.the_number, stage_sequence_num);
-    // append crc to message
-    stage_buf[i++] = crc.the_bytes[1];
-    stage_buf[i++] = crc.the_bytes[0];
     if (axis >= 0 && axis <= 2){
+      for (i=0; i<out_len; i++){
+        crc.the_number = _crc_xmodem_update(crc.the_number, stage_buf[i]);
+      }
+      stage_sequence_num = loop_counter & 0xff;
+      stage_buf[i++] = stage_sequence_num;
+      crc.the_number = _crc_xmodem_update(crc.the_number, stage_sequence_num);
+      // append crc to message
+      stage_buf[i++] = crc.the_bytes[1];
+      stage_buf[i++] = crc.the_bytes[0];
       addr = AXIS_ADDR[axis];
       Wire.beginTransmission(addr);
       if (Wire.write(stage_buf, out_len+3) == (out_len+3)){
@@ -1224,7 +1433,7 @@ bool stage_send_cmd(int axis, unsigned int out_len, unsigned int in_len, bool on
           if(Wire.requestFrom(addr, in_len+4, true) == (in_len+4)){
             // load the response bytes and compute their crc
             crc.the_number = 0xffff;
-            for (i=0; i<(in_len+4);i++){
+            for (i=0; i<(in_len+4); i++){
               stage_buf[i] = Wire.read();
               if(only_check_ack && (i==0) && (stage_buf[0] == 'p')){
                 ret = true;  // break out here if we only want the ack
@@ -1239,9 +1448,45 @@ bool stage_send_cmd(int axis, unsigned int out_len, unsigned int in_len, bool on
                 }  // stage ack check
               }  // sequence number check
             }  // crc check
-          }  // return length check
+          }  // reception length check
         }  // transmission success check
       }  // transmission length check
+    }  // axis check
+  }  // buffer overflow check
+  return (ret);
+}
+
+//  attempts to read an in_len byte long message from the slave, unprompted
+// in_len does not include the two crc bytes or the sequence number byte
+// returns True if the bytes from the slave are crc and sequence number checked
+// and ready to read from stage_buf[0]
+bool stage_blind_read(int axis, unsigned int in_len, bool dont_validate_message){
+  bool ret = false;
+  unsigned int i;
+  Sb crc;
+  crc.the_number = 0xffff;  // crc starting value
+  if (in_len <= (stage_buf_len - 3)){
+    if (axis >= 0 && axis <= 2){
+      //Wire.beginTransmission(addr);
+      if(Wire.requestFrom(AXIS_ADDR[axis], in_len+3, true) == (in_len+3)){
+        // load the response bytes and compute their crc
+        crc.the_number = 0xffff;
+        for (i=0; i<(in_len+3); i++){
+          stage_buf[i] = Wire.read();
+          if(!dont_validate_message){
+            crc.the_number = _crc_xmodem_update(crc.the_number, stage_buf[i]);
+          }  // compute crc
+        }  // read bytes
+        if(dont_validate_message){
+          ret = true;
+        } else {
+          if (crc.the_number == 0){
+            if ((uint8_t)stage_buf[i-3] == stage_sequence_num){
+              ret = true;
+            }  // sequence number check
+          }  // crc check
+        }  // should we crc check
+      }  // reception length check
     }  // axis check
   }  // buffer overflow check
   return (ret);
@@ -1903,7 +2148,7 @@ uint8_t ads_read(bool current_adc, uint8_t reg){
 }
 
 void stream_ADC(EthernetClient c, uint32_t n_readings){
-  static const int msg_len = 6; // length of the ADC stream message
+  const int msg_len = 6; // length of the ADC stream message
   volatile uint8_t buf[msg_len] = {0x00}; // buffer for ADC comms
   volatile uint8_t last_counter_value = 0x00;
   volatile int bytes_to_read = 0;
@@ -1930,6 +2175,7 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
   Wire.setClock(750000);// need I2C fast mode here to keep up with the ADC sample rate
   delayMicroseconds(52); // datasheet says the first conversion starts 105 clock cycles after START/SYNC (in turbo mode when t_clk=1/2.048 MHz)
   while (run_forever || (adc_periods < n_readings)){
+    wdt_reset();  // pet the dog
     while (last_counter_value == buf[0]){ // poll for new sample
       // if the wire module saw a timeout, wait 55ms to ensure the ADC's I2C interface reset itself
       //if (Wire.getWireTimeoutFlag()){
@@ -1982,3 +2228,25 @@ void stream_ADC(EthernetClient c, uint32_t n_readings){
 }
 #endif // NOT ADS1015
 #endif //NO_ADC
+
+// reset reason detection
+void reset_reason(void){
+  // three quick blinks if bit by dog
+  if (resetFlag & (0x01<<WDRF)){
+    D(Serial.println(F("Got reset by the WDT.")));
+#ifndef NO_LED
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+#endif // DEBUG
+    NOP;
+  }
+}

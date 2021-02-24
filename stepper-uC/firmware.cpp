@@ -1,10 +1,10 @@
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 1
-#define VERSION_PATCH 4
+#define VERSION_MINOR 4
+#define VERSION_PATCH 0
 #define BUILD 8e1c82a
 
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
-//#define DEBUG
+#define DEBUG
 
 //#define NO_LED
 
@@ -43,6 +43,7 @@
 #include <util/crc16.h>  // for _crc_xmodem_update
 //#include <util/delay.h>
 #include <avr/io.h>
+#include <avr/wdt.h> /*Watchdog timer handling*/
 extern "C" {
   #include "tmc/ic/TMC5130/TMC5130.h"
 }
@@ -101,11 +102,41 @@ extern "C" {
 #define ENN_PIN PIND
 #define ENN_BIT 4
 
+// The following bits are OPTIBOOT stuff to allow us to know what MCUSR
+// had before the bootloader wiped it out
+/*
+   First, we need a variable to hold the reset cause that can be written before
+   early sketch initialization (that might change r2), and won't be reset by the
+   various initialization code.
+   avr-gcc provides for this via the ".noinit" section.
+*/
+uint8_t resetFlag __attribute__ ((section(".noinit")));
+
+/*
+   Next, we need to put some code to save reset cause from the bootload (in r2)
+   to the variable.  Again, avr-gcc provides special code sections for this.
+   If compiled with link time optimization (-flto), as done by the Arduno
+   IDE version 1.6 and higher, we need the "used" attribute to prevent this
+   from being omitted.
+*/
+void resetFlagsInit(void) __attribute__ ((naked))
+__attribute__ ((used))
+__attribute__ ((section (".init0")));
+void resetFlagsInit(void)
+{
+  /*
+     save the reset flags passed from the bootloader
+     This is a "simple" matter of storing (STS) r2 in the special variable
+     that we have created.  We use assembler to access the right variable.
+  */
+  __asm__ __volatile__ ("sts %0, r2\n" : "=m" (resetFlag) :);
+}
+
 void do_every_short_while(void);
 int wait_for_move(int32_t timeout_ms = MOVE_TIMEOUT);
 void receiveEvent(int);
 void requestEvent(void);
-bool go_to (int32_t);
+void go_to (int32_t);
 int32_t home(void);
 void jog(int);
 void spi_setup(void);
@@ -125,6 +156,8 @@ bool validate_message(int);
 int do_isr_cmd(uint8_t);
 int do_main_cmd(uint8_t);
 int prep_response(int);
+void reset(void);
+void reset_reason(void);
 
 volatile int32_t stage_length = 0; // this is zero when homing has not been done, -1 while homing
 volatile uint32_t current_position = 0;  // keeps track of where we are now
@@ -133,13 +166,13 @@ volatile uint8_t status; // status byte from the driver
 
 // response buffer for i2c responses to requests from the master
 #define RESP_BUF_LEN 24
-static uint8_t out_buf[RESP_BUF_LEN] = { 'f' };
+uint8_t out_buf[RESP_BUF_LEN] = { 'f' };
 volatile int bytes_in_out_buf = 0;
 
 // command buffer
 #define CMD_BUF_LEN 24
-static uint8_t in_buf[CMD_BUF_LEN] = { 0x00 };
-static uint8_t pending_in_buf[CMD_BUF_LEN] = { 0x00 };  // to store not yet processed ones
+uint8_t in_buf[CMD_BUF_LEN] = { 0x00 };
+uint8_t pending_in_buf[CMD_BUF_LEN] = { 0x00 };  // to store not yet processed ones
 volatile uint8_t sequence_num = 0;  // the last sequence number we got from the master
 
 // time to wait after powering up the drive
@@ -160,14 +193,19 @@ const unsigned int LED_PIN = 3; // arduino pin for alive LED
 #endif
 
 void setup() {
-  D(Serial.begin(115200));
-  D(Serial.println("Setup started..."));
-
 #ifndef NO_LED
   // setupLED pin
   digitalWrite(LED_PIN, LOW); // light off
   pinMode(LED_PIN, OUTPUT); // light enabled
 #endif // NO_LED
+
+  D(Serial.begin(115200));
+  D(Serial.println("Setup started..."));
+
+  reset_reason();
+
+  // set watchdog timer for 8 seconds
+  wdt_enable(WDTO_8S);
 
   // disable drive
   BIT_SET(ENN_PORT, ENN_BIT);
@@ -179,11 +217,6 @@ void setup() {
 
   spi_setup();
   reset_drive();
-
-//  D(Serial.println("Location A reached."));
-//  while(true){
-//    NOP;
-//  }
   
   // setup I2C
   Wire.begin(I2C_SLAVE_ADDRESS);
@@ -244,7 +277,9 @@ void reset_drive(void){
   PWMCONF_shadow_reg = 0x00050480;
   IHOLD_IRUN_shadow_reg = 0;
 
-  BIT_SET(ENN_PORT, ENN_BIT);
+  BIT_SET(ENN_PORT, ENN_BIT);  // power down the drive
+  delay(POWER_UP_DELAY); // give the driver a few ms to power off
+
   tmc5130_writeInt(TMC5130, TMC5130_XACTUAL, 0);
   tmc5130_writeInt(TMC5130, TMC5130_XTARGET, 0);
 
@@ -295,13 +330,17 @@ void reset_drive(void){
   TMC5130_FIELD_WRITE(TMC5130, TMC5130_CHOPCONF, TMC5130_INTPOL_MASK, TMC5130_INTPOL_SHIFT, 0);
   TMC5130_FIELD_WRITE(TMC5130, TMC5130_CHOPCONF, TMC5130_DEDGE_MASK, TMC5130_DEDGE_SHIFT, 0);
 
-  // stallguard
+  // stallguard sg_stop on
   TMC5130_FIELD_WRITE(TMC5130, TMC5130_SWMODE, TMC5130_SW_SG_STOP_MASK, TMC5130_SW_SG_STOP_SHIFT, 1);
 
   // set up transition to something
   // higher numbers make stall detection less reliable
   // lower numbers mean stalling will only be turned on with faster movement
-  tmc5130_writeInt(TMC5130, TMC5130_TCOOLTHRS, 300); // was 1000
+  tmc5130_writeInt(TMC5130, TMC5130_TCOOLTHRS, 700); // was 1000
+
+
+  // speed threshold below which stealth is off
+  tmc5130_writeInt(TMC5130, TMC5130_THIGH, 500);
 
 	COOLCONF_shadow_reg = FIELD_SET(COOLCONF_shadow_reg, TMC5130_SGT_MASK, TMC5130_SGT_SHIFT, rescale_sgt(STALL));
   COOLCONF_shadow_reg = FIELD_SET(COOLCONF_shadow_reg, TMC5130_SEMIN_MASK, TMC5130_SEMIN_SHIFT, 2);
@@ -335,54 +374,6 @@ void reset_drive(void){
   //estop(true); 
   freewheel(true);
 }
-
-    
-  //   timesup = false;
-  //   if (rdy_to_send > 0){
-  //     time0 = millis();
-  //     while (!send_later){ // wait for the master to ask us for bytes
-  //       NOP;
-  //       if((millis() - time0) > 500){
-  //         timesup = true;
-  //         break;
-  //       }
-  //     }
-  //     send_later = false;
-  //     if (!timesup){
-  //       Wire.write((uint8_t*)out_buf, rdy_to_send);
-  //     }
-  //   }
-  // }
-
-  // // give up on clock stretch
-  // if ((send_later) && (SEND_LATER_TIMEOUT < (micros() - send_later_t0))){
-  //   send_later = false;
-  //   Wire.write(0x00);
-  // }
-
-// #ifdef DEBUG // bouncy motion testing/debugging
-//   int move_result;
-//   // do a bounce routine
-//   if (stage_length > 0) {
-//     Serial.println(tmc5130_readInt(TMC5130, TMC5130_XENC));
-//     go_to(stage_length/2 + stage_length/8);
-//     move_result = wait_for_move();
-//     if (move_result != 0){
-//       Serial.print("Warning: Movement terminated with code: ");
-//       Serial.println(move_result);
-//     }
-//     Serial.println(tmc5130_readInt(TMC5130, TMC5130_XENC));
-//     go_to(stage_length/2 - stage_length/8);
-//     move_result = wait_for_move();
-//     if (move_result != 0){
-//       Serial.print("Warning: Movement terminated with code: ");
-//       Serial.println(move_result);
-//     }
-//   }
-// #endif // DEBUG
-//}
-
-
 
 // clears stall (and other error status).
 // sets target position to current position
@@ -424,7 +415,7 @@ void estop(bool stop){
   }
 }
 
-//tages a signed int and returns one byte representing the
+// takes a signed int and returns one byte representing the
 // 7 bit two's compliment value of the number.
 // maximum = 63, minimum = -64. anything above or below those will get pegged to the limit
 uint8_t seven_bit_twos_c(int i){
@@ -465,26 +456,35 @@ uint8_t rescale_sgt(uint8_t in){
 int do_isr_cmd(uint8_t cmd){
   int ret_bytes = 0;
   switch (cmd){
+    case 't':  // reset the uc
+      reset();
+      break;
+    case 'v':
+      out_buf[0] = 'p';
+      ret_bytes = 1;
+      ret_bytes += sprintf(&out_buf[1], FIRMWARE_VER);
+      ret_bytes++; // want null terminator
+      in_buf[0] = 0x00;
+      break;
     case 'r': // get stage pos
       out_buf[0] = 'p';
       memcpy(&out_buf[1], &current_position, 4);
-      //out_buf[1] = (current_position >> 24) & 0xFF;
-      //out_buf[2] = (current_position >> 16) & 0xFF;
-      //out_buf[3] = (current_position >> 8) & 0xFF;
-      //out_buf[4] = current_position & 0xFF;
       ret_bytes = 5;
       in_buf[0] = 0x00;
       break;
     case 'l': // get stage length
       out_buf[0] = 'p';
-      out_buf[1] = (stage_length >> 24) & 0xFF;
-      out_buf[2] = (stage_length >> 16) & 0xFF;
-      out_buf[3] = (stage_length >> 8) & 0xFF;
-      out_buf[4] = stage_length & 0xFF;
+      memcpy(&out_buf[1], &stage_length, 4);
       ret_bytes = 5;
       in_buf[0] = 0x00;
       break;
-    case 's':  // status byte
+    case 'e':  // get reset reason byte
+      out_buf[0] = 'p';
+      out_buf[1] = resetFlag;
+      ret_bytes = 2;
+      in_buf[0] = 0x00;
+      break;
+    case 's':  // get driver status byte
       out_buf[0] = 'p';
       out_buf[1] = status; //just send the last status we're aware of. if we're blocked it's probably being updated frequently
       ret_bytes = 2;
@@ -501,20 +501,27 @@ int do_isr_cmd(uint8_t cmd){
       in_buf[0] = 0x00;
       break;
     case 'h':  //home request (to be done later)
+    case 'w':  //write drive register request (to be done later)
+    case 'i':  //read drive register request (to be done later)
     case 'f':  //freewheel request (to be done later)
     case 'g':  //move request (to be done later)
     case 'a':  //jog request (to be done later)
     case 'b':  //jog request (to be done later)
       if (busy){
-        out_buf[0] = 'f';
+        out_buf[0] = 'f';  // send 'f' to reject a command because we're busy now
         in_buf[0] = 0x00;
       } else {
-        out_buf[0] = 'p';
+        if ((cmd == 'g') && (stage_length <= 0)){
+          out_buf[0] = 'f';  // send 'f' to reject a goto command since we're unhomed
+          in_buf[0] = 0x00;
+        } else {
+          out_buf[0] = 'p';  // send 'p' to ack that the command will be done (later)
+        }
       }
       ret_bytes = 1;
       break;
     default:
-      out_buf[0] = 'u'; // press u for unknown command
+      out_buf[0] = 'u'; // send 'u' becuase this is an unknown command
       ret_bytes = 1;
       in_buf[0] = 0x00;
   }
@@ -523,8 +530,11 @@ int do_isr_cmd(uint8_t cmd){
 
 int do_main_cmd(uint8_t cmd){
   int ret_bytes = 0;
+  int32_t value;
+  uint8_t address;
   switch (cmd){
     case 'h':
+      stage_length = -1;
       stage_length = home();
       break;
     case 'f':
@@ -536,195 +546,39 @@ int do_main_cmd(uint8_t cmd){
     case 'b':
       jog(1);
       break;
+    case 'i':  // read a driver register
+      address = (uint8_t) pending_in_buf[1];
+      value = tmc5130_readInt(TMC5130, address);
+      memcpy(out_buf, &value, 4);
+      ret_bytes = 4;
+      D(Serial.print(F("Register 0x")));
+      D(Serial.print(address, HEX));
+      D(Serial.print(F(" is: 0x")));
+      D(Serial.print(value, HEX));
+      D(Serial.print(F(" (that's ")));
+      D(Serial.print(value));
+      D(Serial.println(F(" dec)")));
+      break;
+    case 'w':  // program a driver register
+      address = (uint8_t) pending_in_buf[1];
+      memcpy(&value, &pending_in_buf[2], 4);
+      tmc5130_writeInt(TMC5130, address, value);
+      D(Serial.print(F("Register 0x")));
+      D(Serial.print(address, HEX));
+      D(Serial.print(F(" becomes: 0x")));
+      D(Serial.print(value, HEX));
+      D(Serial.print(F(" (that's ")));
+      D(Serial.print(value));
+      D(Serial.println(F(" dec)")));
+      break;
     case 'g':
-      go_to(*(int32_t*) &pending_in_buf[1]);
+      memcpy(&value, &pending_in_buf[1], 4);
+      //go_to(*(int32_t*) &pending_in_buf[1]);
+      go_to(value);
       break;
   }
   return(ret_bytes);
 }
-
-// processes commands from cmd_buf and cmd_byte
-// slo mode indicates that commands which requre "slow" processing should be handled
-// where "slow" is any processing that requires delays, external access or anything beyond simple variable lookups
-// slo_mode is true when called from the main loop and false when called from an ISR
-// places response bytes (if any) into out_buf and returns number of bytes it put there
-
-// command|meaning|number of bytes to expect in response
-// g|go to|1
-// c|comms check|5
-// h|home|1
-// d|power off drive|1
-// f|enter freewheel mode|1
-// l|get stage length|5
-// s|get status byte|2
-// r|read back current position|5
-/* int handle_cmd(void){
-  int msg_bytes = 0; // number of bytes a return message will have
-  char this_cmd = cmd_byte;
-  cmd_byte = 0x00;
-  int32_t pos = 0; // for storing position data
-  switch (this_cmd){
-    case 'g': // goto
-      if(blocked){
-        out_buf[0] = 'f';
-        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-        rdy_to_send = 1;
-      } else { //not blocked
-        if(slo_mode){ // processing in main loop, not ISR
-          memcpy(&pos, in_buf, sizeof(pos)); // copy in target pos
-          blocked = true; // block duiring go_to
-          if (go_to(pos)){
-            out_buf[0] = 'p';
-            cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-            rdy_to_send = 1;
-          } else {
-            out_buf[0] = 'f';
-            cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-            rdy_to_send = 1;
-          }
-          blocked = false;
-        }
-      }
-      break;
-
-    case 'c': //comms check command
-      cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-      //_delay_us(10000); // for testing to check if we miss the master's request for bytes with this
-      msg_bytes = 0;
-      break;
-
-    case 'h': // home command
-      if(blocked){
-        out_buf[0] = 'f';
-        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-        rdy_to_send = 1;
-      } else { //not blocked
-        stage_length = -1;
-        if(slo_mode){  // processing in main loop, not ISR
-          cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-          blocked = true; // block duiring home
-          stage_length = home();
-          blocked = false;
-        } else { // processing in ISR, not main loop.
-          // accept the homing command, and respond immediately to the master
-          // but don't actually execute the homing procedure here
-          // instead we leave that to be done in the main loop later
-          out_buf[0] = 'p';
-          rdy_to_send = 1;
-        }
-      }
-      break;
-
-    case 'a': // jog direction a command
-    case 'b': // jog direction b command
-      if(blocked){
-        out_buf[0] = 'f';
-        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-        rdy_to_send = 1;
-      } else { //not blocked
-        stage_length = -1;
-        if(slo_mode){  // processing in main loop, not ISR
-          cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-          blocked = true; // block duiring jog
-          if (this_cmd == 'a'){
-            jog(0); // jog in direction 0 (same as initial homing direction)
-          } else {
-            jog(1); // jog in direction 1 (opposite to that of initial homing direction)
-          }
-          stage_length = 0;
-          blocked = false;
-        } else { // processing in ISR, not main loop.
-          // accept the jogging command, and respond immediately to the master
-          // but don't actually execute the jogging procedure here
-          // instead we leave that to be done in the main loop later
-          out_buf[0] = 'p';
-          rdy_to_send = 1;
-        }
-      }
-      break;
-
-    case 'f': // enter freewheel mode (drive can kinda freely spin)
-      if(blocked){
-        out_buf[0] = 'f';
-        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-        rdy_to_send = 1;
-      } else { //not blocked
-        if(slo_mode){  // processing in main loop, not ISR
-          freewheel(true);
-          out_buf[0] = 'p'; // press p for pass
-          cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-          rdy_to_send = 1;
-        }
-      }
-      break;
-
-    case 'd': // disable drive
-      estop(true);
-      out_buf[0] = 'p'; // press p for pass
-      cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-      rdy_to_send = 1;
-      break;
-
-    case 'l': // get stage length command
-      out_buf[0] = 'p'; // press p for pass
-      out_buf[1] = (stage_length >> 24) & 0xFF;
-      out_buf[2] = (stage_length >> 16) & 0xFF;
-      out_buf[3] = (stage_length >> 8) & 0xFF;
-      out_buf[4] = stage_length & 0xFF;
-      cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-      //_delay_us(10000); // for testing to check if we miss the master's request for bytes with this
-      rdy_to_send = 5;
-      break;
-
-    case 's': // status command
-      if(blocked){
-        out_buf[0] = 'p';
-        out_buf[1] = status; //just send the last status we're aware of. if we're blocked it's probably being updated frequently
-        //D(Serial.println(status, BIN));
-        //D(Serial.println(tmc5130_readInt(TMC5130, TMC5130_DRVSTATUS), BIN));
-        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-        rdy_to_send = 2;
-      } else { //not blocked
-        if(slo_mode){  // processing in main loop, not ISR
-          out_buf[0] = 'p'; // press p for pass
-          blocked = true; // block duiring postition register read
-          tmc5130_readInt(TMC5130, TMC5130_DRVSTATUS); // force update of the status byte
-          blocked = false;
-          out_buf[1] = status;
-          cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-          rdy_to_send = 2;
-        }
-      }
-      break;
-    
-    case 'r': // read back position command
-      if(blocked){
-        out_buf[0] = 'f';
-        cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-        rdy_to_send = 1;
-      } else { //not blocked
-        if(slo_mode){  // processing in main loop, not ISR
-          out_buf[0] = 'p'; // press p for pass
-          blocked = true; // block duiring postition register read
-          pos = tmc5130_readInt(TMC5130, TMC5130_XACTUAL);
-          blocked = false;
-          out_buf[1] = (pos >> 24) & 0xFF;
-          out_buf[2] = (pos >> 16) & 0xFF;
-          out_buf[3] = (pos >> 8) & 0xFF;
-          out_buf[4] = pos & 0xFF;
-          cmd_byte = 0x00; // clear the cmd _byte. it has been handled
-          rdy_to_send = 5;
-        }
-      }
-      break;
-
-    default:
-      out_buf[0] = 'u'; // press u for unknown command
-      cmd_byte = 0x00; // clear the cmd_byte. it has been handled
-      rdy_to_send = 1;
-  } // end switch
-  return(rdy_to_send);
-} */
 
 // waits for a move to complete and returns a reason for why it completed
 // -1 programming error. movement completed for unhandled reason
@@ -749,6 +603,7 @@ int wait_for_move(int32_t timeout_ms){ //timeout_ms defaults to MOVE_TIMEOUT
       break; // we're not standing still
     }
     elapsed = millis()-t0;
+    wdt_reset(); // pet the dog
   } while( elapsed < move_start_timeout);
 
   // loop to wait for motion to end
@@ -762,6 +617,7 @@ int wait_for_move(int32_t timeout_ms){ //timeout_ms defaults to MOVE_TIMEOUT
       break;
     }
     elapsed = millis()-t0;
+    wdt_reset(); // pet the dog
   } while( elapsed < timeout_ms);
 
   if (BIT_GET(ENN_PORT, ENN_BIT)){  // check if motor power has been removed
@@ -778,23 +634,25 @@ int wait_for_move(int32_t timeout_ms){ //timeout_ms defaults to MOVE_TIMEOUT
 
 // sends the stage somewhere
 // returns false if the stage is stalled or if the movement is out of bounds
-bool go_to (int32_t target) {
-  bool return_code = false;
-  // TODO: need to more aggressively limit travel to not go close to edges
-  if ( (target > 0) && (target <= stage_length)) {
-    tmc5130_writeInt(TMC5130, TMC5130_XTARGET, target);
+void go_to (int32_t target) {
 
-    // this is the stall check
-    // the action of reading this field will clear a few bits in the register that maybe we don't care about
-    //if (status & BIT2){
-    //if (TMC5130_FIELD_READ(TMC5130, TMC5130_RAMPSTAT, TMC5130_STATUS_SG_MASK, TMC5130_STATUS_SG_SHIFT)){
-    if (TMC5130_FIELD_READ(TMC5130, TMC5130_RAMPSTAT, TMC5130_EVENT_STOP_SG_MASK, TMC5130_EVENT_STOP_SG_SHIFT)){
-      freewheel(true); // we're done
-    } else {
-      return_code = true;
-    }
+  // this is the stall check
+  //if (status & BIT2){
+  //if (TMC5130_FIELD_READ(TMC5130, TMC5130_RAMPSTAT, TMC5130_STATUS_SG_MASK, TMC5130_STATUS_SG_SHIFT)){
+  if (TMC5130_FIELD_READ(TMC5130, TMC5130_RAMPSTAT, TMC5130_EVENT_STOP_SG_MASK, TMC5130_EVENT_STOP_SG_SHIFT)){
+    freewheel(true); // we're done
+  } else if ( (target > 0) && (target <= stage_length) ) {
+    // TODO: need to more aggressively limit travel to not go close to edges
+    tmc5130_writeInt(TMC5130, TMC5130_XTARGET, target);
   }
-  return (return_code);
+
+  
+
+
+    
+    // the action of reading this field will clear a few bits in the register that maybe we don't care about
+    
+    //if (TMC5130_FIELD_READ(TMC5130, TMC5130_RAMPSTAT, TMC5130_STATUS_SG_MASK, TMC5130_STATUS_SG_SHIFT)){
 }
 
 // this is basically half the homing procedure only with configuratble direction
@@ -824,7 +682,6 @@ void jog(int dir){
   wait_for_move();
 
   // i'm not even going to clear the stall here because the next action has to be a home
-
   D(Serial.println("Jogging completed."));
 
   return;
@@ -924,9 +781,11 @@ int32_t tmc5130_readInt(uint8_t tmc5130, uint8_t address)
 
 	uint8_t data[5] = { 0, 0, 0, 0, 0 };
 
+  // load in the address
 	data[0] = address;
 	tmc5130_readWriteArray(tmc5130, &data[0], 5);
 
+  // do the actual read
 	data[0] = address;
 	tmc5130_readWriteArray(tmc5130, &data[0], 5);
 
@@ -949,7 +808,7 @@ void receiveEvent(int how_many){
       if (in_buf[0] != 0x00){  // will need to handle in main
         busy = true;  // set the busy flag because we'll need to do something in the main loop
         // copy over the buffer for cosumption in main
-        memcpy(pending_in_buf, in_buf, sizeof(CMD_BUF_LEN));
+        memcpy(pending_in_buf, in_buf, CMD_BUF_LEN);
       }  // main loop processing check
     }  // valid message check
   }  // non-zero rx check
@@ -962,21 +821,9 @@ void requestEvent(void){
     Wire.write((uint8_t*)out_buf, bytes_in_out_buf);
     bytes_in_out_buf = 0;
   }
-  //send_later = false;
-  //if (bytes_ready > 0){ // if we have something to send, send it right away
-  //  //send_later = false;
-  //  Wire.write((uint8_t*)out_buf, bytes_ready);
-  //  bytes_ready = 0;
-  //} else { // no bytes ready
-  //  // we've been unable to respond to the master from the ISR
-  //  // we'll have to do it later, in the main loop
-  //  send_later = true; // this will trigger clock stretching
-  //  send_later_t0 = micros(); // record the time
-  //  // which will be ended by the call to Wire.flush() from the main loop
-  //}
-  //return(send_later);
 }
 
+// returns true if a CRC checks out
 bool validate_message(int n_bytes){
   bool ret = false;
   int i;
@@ -993,17 +840,43 @@ bool validate_message(int n_bytes){
 
 // gets run once per short while
 void do_every_short_while(void){
+  wdt_reset();  // pet the dog
 #ifndef NO_LED
-    //toggle the alive LED pin
-    //NOP;
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-#else
-    NOP;
+  //toggle the alive LED pin
+  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
 #endif // NO_LED
 #ifdef DEBUG
-    if (Wire.getWireTimeoutFlag()){
-      Serial.println(F("We had a wire library timeout!"));
-      Wire.clearWireTimeoutFlag();
-    }
+  if (Wire.getWireTimeoutFlag()){
+    Serial.println(F("We had a wire library timeout!"));
+    Wire.clearWireTimeoutFlag();
+  }
 #endif // DEBUG
+}
+
+// asks the dog to reset the uc (takes 15ms)
+void reset(void) {
+  wdt_enable(WDTO_15MS);
+  while(true);
+}
+
+// reset reason detection
+void reset_reason(void){
+  // three quick blinks if bit by dog
+  if (resetFlag & (0x01<<WDRF)){
+    D(Serial.println(F("Got reset by the WDT.")));
+#ifndef NO_LED
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    delay(100);
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+#endif // DEBUG
+    NOP;
+  }
 }

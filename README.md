@@ -12,6 +12,7 @@ cd ${this_project}
 pio platform install --with-package framework-arduino-avr atmelavr
 
 mkdir -p pio-main
+#platformio init --board ATmega2560 -d pio-main --project-option "lib_deps = framework-arduino-avr/Wire" --project-option "lib_extra_dirs = \$PROJECT_CORE_DIR/packages/framework-arduino-avr/libraries"
 platformio init --board megaatmega2560 -d pio-main
 pio lib -d pio-main install 872  # Arduino's Ethernet library
 #pio lib -d pio-main install 342 # Adafruit's Arduino library for ADS1015/1115 ADCs (only needed for old hardware)

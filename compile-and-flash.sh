@@ -3,6 +3,10 @@
 PROJECT="$1"
 DEVICE_PORT=$2
 
+# choose what you're flashing
+TARGET=upload
+#TARGET=bootloader
+
 print_usage(){
   echo "Usage: `basename $0` pio_folder [device_port]"
   echo "where pio-folder is the fully set-up project folder (see README.md)"
@@ -24,7 +28,7 @@ then
   if [ -c ${DEVICE_PORT} ]
   then
     pio run -v -t clean -d "${PROJECT}"
-    pio run --verbose -d "${PROJECT}" --target upload --upload-port ${DEVICE_PORT}
+    pio run --verbose -d "${PROJECT}" --target ${TARGET} --upload-port ${DEVICE_PORT}
   else
     echo "ERROR: ${DEVICE_PORT} is not a character device"
     print_usage
