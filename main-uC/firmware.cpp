@@ -655,7 +655,7 @@ String cmd = String("");
 // a buffer for communications with the stage
 const int stage_buf_len = 24;
 char stage_buf[stage_buf_len] = { 0x00 };
-volatile uint8_t stage_sequence_num;
+volatile uint8_t stage_sequence_num = 0;
 
 uint32_t tmp;
 char this_cmd;
@@ -1300,10 +1300,11 @@ void stage_reset_reason(EthernetClient c, int axis){
 }
 
 // transmits out_len bytes from stage_buf to a stage controller
-// then snapshots loop_counter to stage_sequence_num and transmits that
+// then increments stage_sequence_num and transmits that
 // then transmits a crc16 over that message
 // then attempts to read an in_len byte long message from the slave
 // in_len does not include the two crc bytes, the ack byte or the sequence number byte
+// that we expect to get from the slave, so it should only be payload length
 // returns True if the stage controller understood the command and any return bytes
 // from the slave are crc and sequence number checked and ready to read
 // starting at stage_buf[1] if you aren't interested in the ack byte
@@ -1319,7 +1320,7 @@ bool stage_send_cmd(int axis, unsigned int out_len, unsigned int in_len, bool on
       for (i=0; i<out_len; i++){
         crc.the_number = _crc_xmodem_update(crc.the_number, stage_buf[i]);
       }
-      stage_sequence_num = loop_counter & 0xff;
+      stage_sequence_num++;
       stage_buf[i++] = stage_sequence_num;
       crc.the_number = _crc_xmodem_update(crc.the_number, stage_sequence_num);
       // append crc to message
