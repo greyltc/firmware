@@ -1,5 +1,5 @@
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 4
+#define VERSION_MINOR 5
 #define VERSION_PATCH 0
 #define BUILD c7a71f8
 // ====== start user editable config ======
@@ -120,6 +120,12 @@ const char help_w_b[] PROGMEM = "\"wX\", gets the firmware version for axis X";
 const char help_t_a[] PROGMEM = "t";
 const char help_t_b[] PROGMEM = "\"tX\", resets the stage controller for axis X, just \"t\" does so for all connected axes";
 
+const char help_x_a[] PROGMEM = "x";
+const char help_x_b[] PROGMEM = "\"xX[address]\", reads a driver register address for axis X";
+
+const char help_y_a[] PROGMEM = "y";
+const char help_y_b[] PROGMEM = "\"yX[address],[value]\", programs a driver register address for axis X with value";
+
 const char help_z_a[] PROGMEM = "z";
 const char help_z_b[] PROGMEM = "\"zX\", gets the reset reason byte for axis X";
 #endif
@@ -176,6 +182,8 @@ const char* const help[] PROGMEM  = {
   help_i_a, help_i_b,
   help_w_a, help_w_b,
   help_t_a, help_t_b,
+  help_x_a, help_x_b,
+  help_y_a, help_y_b,
   help_z_a, help_z_b,
 #endif
 #ifndef NO_RELAY_SHIELD
@@ -745,94 +753,6 @@ void loop() {
   } // end client disconnection check
 } // end main program loop
 
-/*
-// client index
-int ci;
-
-// main program loop
-void loop() {
-  loop_counter++;
-  pixSetErr = ERR_GENERIC;
-
-  if (loop_counter%short_while_loops == 0){
-    do_every_short_while();
-  }
-  
-  if (loop_counter%long_while_loops == 0){
-    do_every_long_while();
-  }
-
-  // wait for a new client:
-  EthernetClient new_client = server.accept();
-  
-  if (new_client) {
-    for (ci = 0; ci < max_ethernet_clients; ci++) {
-      if (!clients[ci]) {
-        new_client.print(F("You are Client Number "));
-        new_client.print(ci);
-        new_client.println('.');
-        new_client.print(F("I am Firmware Version: "));
-        report_firmware_version(new_client);
-        new_client.print(F("resetFlags are: "));
-        // this only works with optiboot...
-        sprintf(stage_buf, BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(resetFlag));
-        new_client.println(stage_buf);
-        stage_buf[0] = 0x00;
-        new_client.print(F("I have Stage bitmask = "));
-        new_client.print(connected_stages);
-        new_client.println(',');
-        new_client.print(F("and MUX bitmask = "));
-        new_client.print(connected_devices);
-        new_client.println('.');
-        //new_client.println(F("Enter ? for help."));
-
-        delay(10);  // connection garbage collection time
-        //new_client.flush();  // throw away any startup garbage bytes
-        while (new_client.available()){
-          new_client.read(); // throw away any startup garbage bytes
-        }
-        new_client.setTimeout(5000); //give the client 5 seconds to send a terminator to end the command
-
-        send_prompt(new_client);
-        // Once we "accept", the client is no longer tracked by EthernetServer
-        // so we must store it into our list of clients
-        clients[ci] = new_client;
-        break;
-      } else if (ci == max_ethernet_clients -1) {
-        new_client.print(F("ERROR: Maximum client limit reached. Can not accept new connection. Goodbye."));
-        new_client.stop();
-      }
-    } // new client search for loop
-  } // end new client connection if
-
-  // handle message from any client
-  for (ci = 0; ci < max_ethernet_clients; ci++) {
-    while (clients[ci] && clients[ci].available() > 0) {
-      get_cmd(cmd_buf, clients[ci], cmd_buf_len);
-      cmd = String((char*)cmd_buf);
-      //cmd = c.readStringUntil(CMD_TERMINATOR);
-      cmd.toLowerCase(); //case insensative
-      //clients[ci].println(F(""));
-
-      // handle command
-      command_handler(clients[ci], cmd);
-      send_prompt(clients[ci]); // send prompt indicating that the command has been handled
-    }
-  }
-  
-  // stop any clients which disconnect
-  for (ci = 0; ci < max_ethernet_clients; ci++) {
-    if (clients[ci] && !clients[ci].connected()) {
-      clients[ci].print(F("Goodbye Client Number "));
-      clients[ci].print(ci);
-      clients[ci].println(F("."));
-      clients[ci].stop();
-    }
-  } // end client disconnection check
-} // end main program loop
-
-*/
-
 // asks the dog to reset the uc (takes 15ms)
 void reset(void) {
   wdt_enable(WDTO_15MS);
@@ -847,6 +767,8 @@ void command_handler(EthernetClient c, String cmd){
   uint8_t pd;
   uint8_t substrate;
   int chan;
+  uint8_t address;
+  uint32_t value;
 
   if (cmd.equals("")){ //ignore empty command
     NOP;
@@ -930,10 +852,42 @@ void command_handler(EthernetClient c, String cmd){
     } else {
       ERR_MSG
     }
+  } else if (cmd.startsWith("x") && (cmd.length() > 2)){ //read a stage register
+    ax = cmd.charAt(1) - '1';
+    if ((ax >= 0) && (ax <= 2)){
+      address = (uint8_t) cmd.substring(2).toInt();
+      if(stage_read_reg(ax, address)){
+        memcpy(&value, stage_buf, 4);
+        c.println(value);
+      } else {
+        c.print(F("ERROR: Unable to read axis "));
+        c.print(ax);
+        c.print(F(" drive register 0x"));
+        c.println(address, HEX);
+      }
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.startsWith("y") && (cmd.length() > 4) && (cmd.indexOf(',') != -1)){ //program a stage register
+    ax = cmd.charAt(1) - '1';
+    if ((ax >= 0) && (ax <= 2)){
+      address = (uint8_t) cmd.substring(2).toInt();
+      value = (int32_t) cmd.substring(cmd.indexOf(',')+1).toInt();
+      if(!stage_write_reg(ax, address, value)){
+        c.print(F("ERROR: Unable to program axis "));
+        c.print(ax);
+        c.print(F(" drive register 0x"));
+        c.print(address, HEX);
+        c.print(F(" with value 0x"));
+        c.println(value, HEX);
+      }
+    } else {
+      ERR_MSG
+    }
   } else if (cmd.startsWith("g") && (cmd.length() > 2)){ //send the stage somewhere
     ax = cmd.charAt(1) - '1';
     if ((ax >= 0) && (ax <= 2)){
-        stage_go_to(c, ax, cmd.substring(2).toInt());
+      stage_go_to(c, ax, cmd.substring(2).toInt());
     } else {
       ERR_MSG
     }
@@ -1142,64 +1096,9 @@ void command_handler(EthernetClient c, String cmd){
   }
 }
 
+// put testing code here
 void easter_egg(EthernetClient c){
-  uint32_t value;
-  uint8_t address;
-
-  address = 0x12;  // TSTEP
-  address = 0x39;  // encoder value
-  stage_write_reg(2, address, 3456);
-  if (stage_read_reg(2, address)){
-    memcpy(&value, stage_buf, 4);
-    c.print(F("Register 0x"));
-    c.print(address, HEX);
-    c.print(F(" is: 0x"));
-    c.print(value, HEX);
-    c.print(F(" (that's "));
-    c.print(value);
-    c.println(F(" dec)"));
-  }
-/*   
-  bool spi = false;
-  uint32_t expanders = 0x00000000;
-
-  expanders = mcp_setup(spi);
-
-
-  //while(true){
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, 0x00);
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(6) | bit(7))); // lights up pix marked 1
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(1) | bit(6) | bit(7))); // lights up pix marked 4
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(2) | bit(6) | bit(7))); // lights up pix marked 2
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(3) | bit(6) | bit(7))); // lights up pix marked 5
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(4) | bit(6) | bit(7))); // lights up pix marked 3
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(5) | bit(6) | bit(7))); // lights up pix marked 6
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, 0x00);
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(1) | bit(2) | bit(6) | bit(7)));
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(3) | bit(4) | bit(5) | bit(6) | bit(7)));
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(1) | bit(2) | bit(3) | bit(4) | bit(5) | bit(6) | bit(7)));
-    delay(500);
-    mcp_write(spi, 0x00, MCP_OLATA_ADDR, 0x00);
-  //}
- */
-
-  //digitalWrite(RELAY2_PIN, !digitalRead(RELAY2_PIN));
-  // close some relays
-  //mcp_write(spi, 0x00, MCP_OLATA_ADDR, (bit(0) | bit(6) | bit(7)));
-
-  // close another relay
-  //mcp_write(spi, 0x00, MCP_OLATB_ADDR, 0x01);
-
+  NOP;
 }
 
 // gets run once per long while

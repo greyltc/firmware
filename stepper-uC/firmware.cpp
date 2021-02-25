@@ -1,10 +1,10 @@
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 4
+#define VERSION_MINOR 5
 #define VERSION_PATCH 0
 #define BUILD 8e1c82a
 
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
-#define DEBUG
+//#define DEBUG
 
 //#define NO_LED
 
