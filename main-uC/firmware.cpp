@@ -81,7 +81,7 @@ const char help_v_a[] PROGMEM = "v";
 const char help_v_b[] PROGMEM = "display firmware revision";
 
 const char help_s_a[] PROGMEM = "s";
-const char help_s_b[] PROGMEM = "\"sXY[Z]\", selects pixel Y on substrate X if no Z. selects pixel Z on substrate XY if Z is given. just \"s\" disconnects all pixels";
+const char help_s_b[] PROGMEM = "\"sXY[Z]\", selects pixel Y on substrate X if no Z. selects pixel Z on substrate XY if Z is given. just \"s\" disconnects all pixels. pixel selection value can be 0-8 for single pixel mode. for direct latch program mode, send pixel selection integer strings longer than one character in length (can pad with zero)";
 
 const char help_c_a[] PROGMEM = "c";
 const char help_c_b[] PROGMEM = "\"cX\", checks that MUX X is connected. just \"c\" returns a bitmask of connected port expanders";
@@ -969,7 +969,7 @@ void command_handler(EthernetClient c, String cmd){
 #else
     mcp_all_off(true);
 #endif
-  } else if (cmd.startsWith("s") && ((cmd.length() == 3) || (cmd.length() == 4))){ //pixel select command
+  } else if (cmd.startsWith("s") && ((cmd.length() >= 3) && (cmd.length() <= 7))){ //pixel select command
     pixSetErr = set_pix(cmd.substring(1));
     if (pixSetErr !=0){
       c.print(F("ERROR: Pixel selection error code "));
@@ -1258,9 +1258,9 @@ void stage_go_to(EthernetClient c, int axis, int32_t position){
   }
 }
 
-// writes a stage driver register returns true if the slave accepted our request
+// writes a stage driver register. returns true if the slave accepted our request
 bool stage_write_reg(int axis, uint8_t address, int32_t value){
-  int retries = 10;
+  //int retries = 10;
   bool ret = false;
   stage_buf[0] = 'w';
   stage_buf[1] = address;
@@ -1664,7 +1664,10 @@ uint32_t mcp_setup(bool spi){
 // A is the substrate row on [1,4]
 // B is the substrage col on [a,h] (form 1) or [a,e] (form 2)
 // C is the pixel number to connect on [0,8] (form 1) or [0,6] (form 2), "0" being a special selection that disconnects the substrate
+// otherwise if C is longer than one character long, it will be converted into a uint16 and used to directly program the latches
 int set_pix(String pix){
+  bool dlp = false;  // direct latch program mode
+  uint16_t dlp_val = 0;
   bool spi = true;
   int error = NO_ERROR;
   int switch_layout = NO_SWITCHES;
@@ -1681,10 +1684,10 @@ int set_pix(String pix){
   int min_pix = -1;
   int max_pix = -1;
 
-  if (pix.length() == 2){
-    switch_layout = SNAITH_SWITCHES;
-  } else if (pix.length() == 3){
+  if (isDigit(pix.charAt(0))){
     switch_layout = OTTER_SWITCHES;
+  } else {
+    switch_layout = SNAITH_SWITCHES;
   }
 
   switch (switch_layout){
@@ -1699,6 +1702,11 @@ int set_pix(String pix){
       min_pix = 0;
       max_pix = 8;
       spi = true;
+      if (pix.length() > 2){
+        pixel = 1;  // just make sure the pixel check works
+        dlp = true;
+        dlp_val = (uint16_t) (pix.substring(2).toInt() & 0xffff);
+      }
       break;
     case OTTER_SWITCHES:
       row = pix.charAt(0) - '1'; //convert string "1", "2", "3"... to int 0, 1, 2...
@@ -1711,19 +1719,24 @@ int set_pix(String pix){
       min_pix = 0;
       max_pix = 6;
       spi = false;
+      if (pix.length() > 3){
+        pixel = 1;  // jsut make sure the pixel check works
+        dlp = true;
+        dlp_val = (uint16_t) (pix.substring(3).toInt() & 0xffff);
+      }
       break;
   /*
   * 
   *    =====otter substrate grid=====
   *     --------------------------
   *    |       o                  |
-  *    | E4   D4   C4   B4   A4   |
+  *    | 4E   4D   4C   4B   4A   |
   *    |                          |
-  *    | E3   D3   C3   B3   A3   |
+  *    | 3E   3D   3C   3B   3A   |
   *    |                          |   --> mux box connections
-  *    | E2   D2   C2   B2   A2   |   -->    this side
+  *    | 2E   2D   2C   2B   2A   |   -->    this side
   *    |                          |
-  *    | E1   D1   C1   B1   A1   |
+  *    | 1E   1D   1C   1B   1A   |
   *    |                          |
   *     --------------------------
   *  o = orientation hole
@@ -1776,13 +1789,17 @@ int set_pix(String pix){
       switch (switch_layout){
         case SNAITH_SWITCHES:
           mcp_dev_addr = col;
-          if ((pixel == 8) || (pixel == 6) || (pixel == 7) || (pixel == 5)) {
-            mcp_reg_value = TOP; // top bus bar connection is closer to these pixels
-          } else if ((pixel == 4) || (pixel == 2) || (pixel == 3) || (pixel == 1)){
-            mcp_reg_value = BOT; // bottom bus bar connection is closer to the rest
-          } else { // turn off portA (pixel 0)
-            mcp_reg_value = 0x00;
-          }
+	  if (dlp){
+            mcp_reg_value = (uint8_t) (dlp_val & 0xff);
+          } else {
+            if ((pixel == 8) || (pixel == 6) || (pixel == 7) || (pixel == 5)) {
+              mcp_reg_value = TOP; // top bus bar connection is closer to these pixels
+            } else if ((pixel == 4) || (pixel == 2) || (pixel == 3) || (pixel == 1)){
+              mcp_reg_value = BOT; // bottom bus bar connection is closer to the rest
+            } else { // turn off portA (pixel 0)
+              mcp_reg_value = 0x00;
+            }
+	  }
           mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value); //enable TOP or BOT bus connection
           mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATA_ADDR);
           
@@ -1790,11 +1807,15 @@ int set_pix(String pix){
             error += ERR_SELECTION_A_DISAGREE;
           }
 
-          if (pixel == 0) {
-            mcp_reg_value = 0x00;
+          if (dlp){
+            mcp_reg_value = (uint8_t) ((dlp_val >> 8) & 0xff);
           } else {
-            mcp_reg_value = 0x01 << (pixel -1);
-          }
+            if (pixel == 0) {
+              mcp_reg_value = 0x00;
+            } else {
+              mcp_reg_value = 0x01 << (pixel -1);
+            }
+	  }
           mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value); //enable pixel connection
           mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATB_ADDR);
 
@@ -1817,36 +1838,40 @@ int set_pix(String pix){
             mcp_reg_addr = MCP_OLATB_ADDR;
           }
 
-          // set the pixel lines
-          switch (pixel){
-            case 1:
-              mcp_reg_value = 0x01<<0;
-              break;
-            case 2:
-              mcp_reg_value = 0x01<<2;
-              break;
-            case 3:
-              mcp_reg_value = 0x01<<4;
-              break;
-            case 4:
-              mcp_reg_value = 0x01<<1;
-              break;
-            case 5:
-              mcp_reg_value = 0x01<<3;
-              break;
-            case 6:
-              mcp_reg_value = 0x01<<5;
-              break;
-          }
+          if (dlp){
+            mcp_reg_value = (uint8_t) (dlp_val & 0xff);
+          } else {
+            // set the pixel lines
+            switch (pixel){
+              case 1:
+                mcp_reg_value = 0x01<<0;
+                break;
+              case 2:
+                mcp_reg_value = 0x01<<2;
+                break;
+              case 3:
+                mcp_reg_value = 0x01<<4;
+                break;
+              case 4:
+                mcp_reg_value = 0x01<<1;
+                break;
+              case 5:
+                mcp_reg_value = 0x01<<3;
+                break;
+              case 6:
+                mcp_reg_value = 0x01<<5;
+                break;
+            }
 
-          // work out which common pins we'll use (this will only matter with cut pcb jumpers on baseboards)
-          if ((pixel == 1) || (pixel == 2) || (pixel == 4)) {
-            mcp_reg_value |= 0x01<<6; // top bus bar connection is closer to these pixels
-          } else if ((pixel == 5) || (pixel == 6) || (pixel == 3)){
-            mcp_reg_value |= 0x01<<7; // bottom bus bar connection is closer to the rest
-          } else { // turn off portA (pixel 0)
-            mcp_reg_value = 0x00;
-          }
+            // work out which common pins we'll use (this will only matter with cut pcb jumpers on baseboards)
+            if ((pixel == 1) || (pixel == 2) || (pixel == 4)) {
+              mcp_reg_value |= 0x01<<6; // top bus bar connection is closer to these pixels
+            } else if ((pixel == 5) || (pixel == 6) || (pixel == 3)){
+              mcp_reg_value |= 0x01<<7; // bottom bus bar connection is closer to the rest
+            } else { // turn off portA (pixel 0)
+              mcp_reg_value = 0x00;
+            }
+	  }
 
           mcp_write(spi, mcp_dev_addr, mcp_reg_addr, mcp_reg_value); // do it.
           mcp_readback_value = mcp_read(spi, mcp_dev_addr, mcp_reg_addr);
