@@ -5,7 +5,6 @@ Firmware design files for controlling the hardware from https://github.com/greyl
 Install platformio (`yay -Syyu platformio` perhaps?)
 ```
 git clone ${this_project}
-git clone https://github.com/greyltc/ArduinoCore-avr.git # for my wire library mods
 cd ${this_project}
 
 # make sure we have the framework&package we need
