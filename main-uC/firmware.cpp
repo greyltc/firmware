@@ -1705,7 +1705,7 @@ int set_pix(String pix){
       if (pix.length() > 2){
         pixel = 1;  // just make sure the pixel check works
         dlp = true;
-        dlp_val = (uint16_t) (pix.substring(2).toInt() & 0xffff);
+        dlp_val = (uint16_t) (pix.substring(1).toInt() & 0xffff);
       }
       break;
     case OTTER_SWITCHES:
@@ -1722,7 +1722,7 @@ int set_pix(String pix){
       if (pix.length() > 3){
         pixel = 1;  // jsut make sure the pixel check works
         dlp = true;
-        dlp_val = (uint16_t) (pix.substring(3).toInt() & 0xffff);
+        dlp_val = (uint16_t) (pix.substring(2).toInt() & 0xffff);
       }
       break;
   /*
