@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 6
-#define VERSION_PATCH 1
+#define VERSION_MINOR 7
+#define VERSION_PATCH 0
 #define BUILD 02f9598
 // ====== start user editable config ======
 
@@ -781,7 +781,7 @@ void command_handler(EthernetClient c, String cmd){
   } else if (cmd.equals("eqe")){ //switch relays to lock-in
     digitalWrite(RELAY3_PIN, HIGH);
     digitalWrite(RELAY4_PIN, HIGH);
-#endif
+#endif  // NO_RELAY_SHIELD
 #ifndef NO_STAGE
   } else if (cmd.equals("h")){ // home all stages
     for (i=0; i<N_MAX_AXIS; i++){
@@ -962,20 +962,6 @@ void command_handler(EthernetClient c, String cmd){
     c.print(F("Analog voltage span as read by U5 (voltage adc): "));
     c.print(ads_check_supply(false),6);
     c.println(F("V"));
-#endif //NO_ADC
-  } else if (cmd.equals("s")){ //pixel deselect command
-#ifdef I2C_MUX
-    mcp_all_off(false);
-#else
-    mcp_all_off(true);
-#endif
-  } else if (cmd.startsWith("s") && ((cmd.length() >= 3) && (cmd.length() <= 7))){ //pixel select command
-    pixSetErr = set_pix(cmd.substring(1));
-    if (pixSetErr !=0){
-      c.print(F("ERROR: Pixel selection error code "));
-      c.println(pixSetErr);
-    }
-#ifndef NO_ADC
   } else if (cmd.startsWith("p") && (cmd.length() == 2)){ //photodiode measure command
     pd = cmd.charAt(1) - '0';
     if ((pd == 1) || (pd == 2)){
@@ -983,20 +969,6 @@ void command_handler(EthernetClient c, String cmd){
     } else {
       ERR_MSG
     }
-#endif // NO_ADC
-  } else if (cmd.equals("c")){
-    connected_devices = mcp_setup(MCP_SPI);
-    c.println(connected_devices);
-  } else if (cmd.startsWith("c") && ((cmd.length() == 2))){ //mux check command
-    substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
-    if ((substrate >= 0) && (substrate <= 9)){
-      if (!mcp_check(MCP_SPI, substrate)){
-        c.println(F("MUX not found"));
-      }
-    } else {
-      ERR_MSG
-    }
-#ifndef NO_ADC
   } else if (cmd.startsWith("d") && (cmd.length() == 2)){ //pogo pin board sense divider measure command
     substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
     if ((substrate >= 0) && (substrate <= 7)){
@@ -1089,6 +1061,30 @@ void command_handler(EthernetClient c, String cmd){
     c.stop();
     delay(100);
     reset();
+  } else if (cmd.equals("c")){
+    connected_devices = mcp_setup(MCP_SPI);
+    c.println(connected_devices);
+  } else if (cmd.startsWith("c") && ((cmd.length() == 2))){ //mux check command
+    substrate = cmd.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
+    if ((substrate >= 0) && (substrate <= 9)){
+      if (!mcp_check(MCP_SPI, substrate)){
+        c.println(F("MUX not found"));
+      }
+    } else {
+      ERR_MSG
+    }
+  } else if (cmd.equals("s")){ //pixel deselect command
+#ifdef I2C_MUX
+    mcp_all_off(false);
+#else // I2C_MUX
+    mcp_all_off(true);
+#endif // I2C_MUX
+  } else if (cmd.startsWith("s") && ((cmd.length() >= 3) && (cmd.length() <= 7))){ //pixel select command
+    pixSetErr = set_pix(cmd.substring(1));
+    if (pixSetErr !=0){
+      c.print(F("ERROR: Pixel selection error code "));
+      c.println(pixSetErr);
+    }
   } else if (cmd.equals(F("exit")) || cmd.equals(F("close")) || cmd.equals(F("disconnect")) || cmd.equals(F("quit")) || cmd.equals(F("logout"))){ //logout
     c.stop();
   } else { //bad command
