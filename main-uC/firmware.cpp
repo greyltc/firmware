@@ -1785,7 +1785,7 @@ int set_pix(String pix){
       switch (switch_layout){
         case SNAITH_SWITCHES:
           mcp_dev_addr = col;
-	  if (dlp){
+	        if (dlp){
             mcp_reg_value = (uint8_t) (dlp_val & 0xff);
           } else {
             if ((pixel == 8) || (pixel == 6) || (pixel == 7) || (pixel == 5)) {
@@ -1795,7 +1795,7 @@ int set_pix(String pix){
             } else { // turn off portA (pixel 0)
               mcp_reg_value = 0x00;
             }
-	  }
+	        }
           mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value); //enable TOP or BOT bus connection
           mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATA_ADDR);
           
@@ -1811,7 +1811,7 @@ int set_pix(String pix){
             } else {
               mcp_reg_value = 0x01 << (pixel -1);
             }
-	  }
+	        }
           mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value); //enable pixel connection
           mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATB_ADDR);
 
@@ -1867,7 +1867,7 @@ int set_pix(String pix){
             } else { // turn off portA (pixel 0)
               mcp_reg_value = 0x00;
             }
-	  }
+	        }
 
           mcp_write(spi, mcp_dev_addr, mcp_reg_addr, mcp_reg_value); // do it.
           mcp_readback_value = mcp_read(spi, mcp_dev_addr, mcp_reg_addr);
