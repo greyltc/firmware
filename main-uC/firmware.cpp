@@ -1,5 +1,5 @@
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 7
+#define VERSION_MINOR 8
 #define VERSION_PATCH 0
 #define BUILD ecf3c14
 // ====== start user editable config ======
@@ -481,7 +481,7 @@ uint32_t mcp_setup(bool);
 uint8_t mcp_read(bool, uint8_t, uint8_t);
 void mcp_write(bool, uint8_t, uint8_t, uint8_t);
 bool mcp_check(bool, uint8_t);
-void mcp_all_off(bool);
+int mcp_all_off(bool);
 int set_pix(String);
 
 // adc functions
@@ -1075,10 +1075,14 @@ void command_handler(EthernetClient c, String cmd){
     }
   } else if (cmd.equals("s")){ //pixel deselect command
 #ifdef I2C_MUX
-    mcp_all_off(false);
+    pixSetErr = mcp_all_off(false);
 #else // I2C_MUX
-    mcp_all_off(true);
+    pixSetErr = mcp_all_off(true);
 #endif // I2C_MUX
+    if (pixSetErr !=0){
+      c.print(F("ERROR: Pixel clear error code "));
+      c.println(pixSetErr);
+    }
   } else if (cmd.startsWith("s") && ((cmd.length() >= 3) && (cmd.length() <= 7))){ //pixel select command
     pixSetErr = set_pix(cmd.substring(1));
     if (pixSetErr !=0){
@@ -1574,7 +1578,9 @@ void mcp_write(bool spi, uint8_t dev_address, uint8_t reg_address, uint8_t value
   }
 }
 
-void mcp_all_off(bool spi){
+int mcp_all_off(bool spi){
+  int error = NO_ERROR;
+  uint8_t mcp_readback_value = 0x00;
   uint8_t mcp_dev_addr, max_address;
   if (spi){
     max_address = 7;
@@ -1585,10 +1591,19 @@ void mcp_all_off(bool spi){
   for(mcp_dev_addr = 0; mcp_dev_addr <= max_address; mcp_dev_addr++){
     // set output latch A low
     mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, 0x00);
+    mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATA_ADDR);
+    if (mcp_readback_value != 0x00) {
+      error += ERR_SELECTION_A_DISAGREE;
+    }
 
     // set output latch B low
     mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, 0x00);
+    mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATB_ADDR);
+    if (mcp_readback_value != 0x00) {
+      error += ERR_SELECTION_B_DISAGREE;
+    }
   }
+  return (error);
 }
 
 // checks for ability to communicate with a mux chip
