@@ -84,7 +84,7 @@ const char help_s_a[] PROGMEM = "s";
 const char help_s_b[] PROGMEM = "\"sXY[Z]\", selects pixel Y on substrate X if no Z. selects pixel Z on substrate XY if Z is given. just \"s\" disconnects all pixels. pixel selection value can be 0-8 for single pixel mode. for direct latch program mode, send pixel selection integer strings longer than one character in length (can pad with zero)";
 
 const char help_c_a[] PROGMEM = "c";
-const char help_c_b[] PROGMEM = "\"cX\", checks that MUX X is connected. just \"c\" returns a bitmask of connected port expanders";
+const char help_c_b[] PROGMEM = "\"cX\",  checks that MUX X is connected. just \"c\" returns a bitmask of connected port expanders while resetting the mux hardware";
 
 const char help_e_a[] PROGMEM = "e";
 const char help_e_b[] PROGMEM = "\"eX\", checks that stage X is connected. just \"e\" returns a bitmask of connected stage controllers";
