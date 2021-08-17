@@ -1,6 +1,6 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 8
-#define VERSION_PATCH 1
+#define VERSION_PATCH 2
 #define BUILD 384c7cf
 // ====== start user editable config ======
 
@@ -527,17 +527,33 @@ void setup() {
   digitalWrite(HARDWARE_SPI_CS, HIGH); //deselect
   pinMode(HARDWARE_SPI_CS, OUTPUT);
 
+#ifdef BIT_BANG_SPI
   digitalWrite(PE_CS_PIN, HIGH); //deselect
   pinMode(PE_CS_PIN, OUTPUT); // get ready to chipselect
 
-#ifdef BIT_BANG_SPI
   digitalWrite(PE_SCK_PIN, LOW); //clock starts low
   pinMode(PE_SCK_PIN, OUTPUT);
 
   digitalWrite(PE_MOSI_PIN, LOW); //data starts low
   pinMode(PE_MOSI_PIN, OUTPUT);
-  
+
   pinMode(PE_MISO_PIN, INPUT);
+
+  // an init procedure to try to ensure the SPI bus is ready under all conditions
+  delayMicroseconds(20);
+  digitalWrite(PE_CS_PIN, LOW); //select
+  delayMicroseconds(20);
+  digitalWrite(PE_CS_PIN, HIGH); //deselect
+  delayMicroseconds(20)
+
+  digitalWrite(PE_SCK_PIN, HIGH); //clock high
+  delayMicroseconds(20); // wait to ensure the adc has finished powering up
+  digitalWrite(PE_CS_PIN, LOW); //select
+  delayMicroseconds(20); // wait to ensure the adc has finished powering up
+  digitalWrite(PE_CS_PIN, HIGH); //select
+  delayMicroseconds(20)
+  digitalWrite(PE_SCK_PIN, LOW); //clock high
+  delayMicroseconds(20)
 #endif // BIT_BANG_SPI
 
   Wire.begin(); // for I2C
