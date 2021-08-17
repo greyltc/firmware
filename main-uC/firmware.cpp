@@ -395,7 +395,8 @@ SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
 #ifdef I2C_MUX
 bool MCP_SPI = false;
 #else
-bool MCP_SPI = true;
+bool MCP_SPI = true;                ret, found_prompt = p._query(f"s{slot}{1<<b:05d}")  # hit each port expander line
+
 #endif
 
 // I2C timeouts
@@ -544,16 +545,16 @@ void setup() {
   digitalWrite(PE_CS_PIN, LOW); //select
   delayMicroseconds(20);
   digitalWrite(PE_CS_PIN, HIGH); //deselect
-  delayMicroseconds(20)
+  delayMicroseconds(20);
 
   digitalWrite(PE_SCK_PIN, HIGH); //clock high
   delayMicroseconds(20); // wait to ensure the adc has finished powering up
   digitalWrite(PE_CS_PIN, LOW); //select
   delayMicroseconds(20); // wait to ensure the adc has finished powering up
   digitalWrite(PE_CS_PIN, HIGH); //select
-  delayMicroseconds(20)
+  delayMicroseconds(20);
   digitalWrite(PE_SCK_PIN, LOW); //clock high
-  delayMicroseconds(20)
+  delayMicroseconds(20);
 #endif // BIT_BANG_SPI
 
   Wire.begin(); // for I2C
