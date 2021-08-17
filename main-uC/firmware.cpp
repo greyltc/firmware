@@ -395,7 +395,7 @@ SPISettings switch_spi_settings(500000, MSBFIRST, SPI_MODE0);
 #ifdef I2C_MUX
 bool MCP_SPI = false;
 #else
-bool MCP_SPI = true;                ret, found_prompt = p._query(f"s{slot}{1<<b:05d}")  # hit each port expander line
+bool MCP_SPI = true;
 
 #endif
 
