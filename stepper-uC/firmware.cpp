@@ -291,7 +291,7 @@ void reset_drive(void){
 
   tmc5130_writeInt(TMC5130, TMC5130_VSTART, 0);
   tmc5130_writeInt(TMC5130, TMC5130_A1, 1000);
-  tmc5130_writeInt(TMC5130, TMC5130_V1, 50000);
+  tmc5130_writeInt(TMC5130, TMC5130_V1, 0);  // was 50000. 0 disables A1 and V1 phases
   tmc5130_writeInt(TMC5130, TMC5130_AMAX, 1500);
   tmc5130_writeInt(TMC5130, TMC5130_VMAX, VMAX);
   tmc5130_writeInt(TMC5130, TMC5130_DMAX, 1500);
