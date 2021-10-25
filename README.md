@@ -91,3 +91,23 @@ You can verify a `:flash` firmware file on disk matches that in a device with:
 ```
 ~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:v:file_on_disk.hex:i
 ```
+
+## ng
+```
+sudo pacman -Syu dfu-util
+pio platform install --with-package framework-arduino-mbed "ststm32"
+mkdir -p pio-main-ng
+platformio init --board portenta_h7_m7 -d pio-main-ng
+pio lib -d pio-main-ng install "khoih-prog/MDNS_Generic"
+pio lib -d pio-main-ng uninstall openslab-osu/EthernetLarge
+pio lib -d pio-main-ng uninstall arduino-libraries/Ethernet
+pio lib -d pio-main-ng uninstall sstaub/Ethernet3
+pio lib -d pio-main-ng uninstall adafruit/Ethernet2
+pio lib -d pio-main-ng uninstall jandrassy/WiFiEspAT
+pio lib -d pio-main-ng uninstall arduino-libraries/WiFi101
+pio lib -d pio-main-ng uninstall khoih-prog/WiFiNINA_Generic
+find main-ng -mindepth 1 -exec ln -sfr {} pio-main-ng/src/ \;
+pio run -d pio-main-ng
+#pio run -d pio-main-ng --target upload
+dfu-util --download pio-main-ng/.pio/build/portenta_h7_m7/firmware.bin --alt 0 --dfuse-address=0x08040000:leave
+```
