@@ -28,5 +28,8 @@ jobs:
           cd ..
           pwd
           ls -al
+          cd ..
+          pwd
+          ls -al
       - name: check version
         run: pio --version
