@@ -12,10 +12,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container: ghcr.io/greyltc-org/firmware-builder:20220216.0.104
     permissions:
       contents: write
     steps:
       - name: Checkout repo
         uses: actions/checkout@v2
-      - name: Hello World
-        run: echo "Hello CI!"
+      - name: Compile
+        run: |
+          pwd
+          ls -al
+      - name: check version
+        run: pio --version
