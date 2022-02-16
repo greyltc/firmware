@@ -20,16 +20,14 @@ jobs:
         uses: actions/checkout@v2
       - name: Compile
         run: |
-          pwd
-          ls -al
-          cd ..
-          pwd
-          ls -al
-          cd ..
-          pwd
-          ls -al
-          cd ..
-          pwd
-          ls -al
-      - name: check version
-        run: pio --version
+          repo="$(pwd)"
+
+          board="megaatmega2560"
+          source_dir="main-uC"
+          (cd "/${board}/src" && ln -sf "${repo}/${source_dir}"/* .)
+          pio run -d "/${board}"
+
+          board="ATmega328PB"
+          source_dir="stepper-uC"
+          (cd "/${board}/src" && ln -sf "${repo}/${source_dir}"/* .)
+          pio run -d "/${board}"
