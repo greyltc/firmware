@@ -223,7 +223,7 @@ char err_byte[3]; // for holding a null terminated hex string for one single com
 // create version string
 #define STRINGIFY0(s) # s
 #define STRINGIFY(s) STRINGIFY0(s)
-#define FIRMWARE_VER STRINGIFY(VERSION_MAJOR) "." STRINGIFY(VERSION_MINOR) "." STRINGIFY(VERSION_PATCH) "+" STRINGIFY(BUILD)
+#define FIRMWARE_VER "20220217.0.10"
 
 #ifndef NO_ADC
 #ifdef ADS1015
