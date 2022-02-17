@@ -1,6 +1,13 @@
 # firmware
 Firmware design files for controlling the hardware from https://github.com/greyltc/electronics and/or https://github.com/greyltc/hardware
 
+## Build
+```
+git clone https://github.com/greyltc/firmware.git && cd firmware
+docker buildx build --progress plain --target export --output type=local,dest=. .
+```
+You should now have various compiled firmware .hex files that are ready to flash.
+
 ## Prepare
 Install platformio (`yay -Syyu platformio` perhaps?)
 ```
