@@ -14,6 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      MAIN_PACKAGE_NAME: platformio
+      ACTIONS_BOT_NAME: github-actions[bot]
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v2
@@ -35,18 +39,77 @@ jobs:
           --output bot_info.json
           echo "::set-output name=bot-id::$(cat bot_info.json | jq --raw-output '.id')"
 
-      - name: Set version
+      - name: Set build version
+        if: github.event_name != 'pull_request'
         run: |
           echo "Setting version ${THIS_VERSTRING}"
-          sed --in-place 's,^#define FIRMWARE_VER.*,#define FIRMWARE_VER "'${THIS_VERSTRING}'",g' main-uC/firmware.cpp
-          sed --in-place 's,^#define FIRMWARE_VER.*,#define FIRMWARE_VER "'${THIS_VERSTRING}'",g' stepper-uC/firmware.cpp
+          sed --in-place 's,^#define FIRMWARE_VER.*,#define FIRMWARE_VER "'${{ env.THIS_VERSTRING }}'",g' main-uC/firmware.cpp
+          sed --in-place 's,^#define FIRMWARE_VER.*,#define FIRMWARE_VER "'${{ env.THIS_VERSTRING }}'",g' stepper-uC/firmware.cpp
+          git config --global user.name "${ACTIONS_BOT_NAME%[*}"
+          git config --global user.email "${{ steps.gbid.outputs.bot-id }}+${ACTIONS_BOT_NAME}@users.noreply.github.com"
+          git add .
+          git commit -m "set build version ${{ env.THIS_VERSTRING }}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
 
+        # https://github.com/docker/build-push-action
       - name: Compile firmware
         id: build-fw
         uses: docker/build-push-action@v2
         with:
           target: export
           outputs: type=local,dest=out
+
+      - name: Tag & Push
+        if: github.event_name != 'pull_request'
+        run: |
+          git tag -a "v${{ env.THIS_VERSTRING }}" -m "Firmware version ${{ env.THIS_VERSTRING }} build"
+          git push -u origin $(git rev-parse --abbrev-ref HEAD) --tags
+
+      # https://docs.github.com/en/rest/reference/releases#create-a-release
+      - name: Make release and upload assets
+        if: github.event_name != 'pull_request'
+        run: |
+          curl --silent \
+            --url https://api.github.com/repos/${{ github.repository }}/releases \
+            --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+            --header "Accept: application/vnd.github.v3+json" \
+            --data '{"draft":false,"tag_name":"v${{ env.THIS_VERSTRING }}","name":"{{ env.THIS_VERSTRING }}"}' \
+            --output rel_resp.json
+          echo "Release Done."
+          ASSET_UL_URL=$(cat rel_resp.json | jq --raw-output '.upload_url' | sed "s|{?.*||g")
+          ASSET_UL_URL="${ASSET_UL_URL}?name=asset"
+
+          for ASSET_FILE in out/*
+          do
+            # upload asset
+            echo "Uploading asset..."
+            # https://docs.github.com/en/rest/reference/releases#upload-a-release-asset
+            curl --silent \
+              --url "${ASSET_UL_URL}" \
+              --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+              --header "Accept: application/vnd.github.v3+json" \
+              --header "Content-Type: $(file --brief --mime-type ${ASSET_FILE})" \
+              --data-binary @${ASSET_FILE} \
+              --output asset_resp.json
+            ASSET_URL=$(cat asset_resp.json | jq --raw-output '.url')
+            echo "Asset upload done."
+            
+            # update asset
+            ASSET_NAME="$(basename ${ASSET_FILE})"
+            echo "Updating asset..."
+            jq -n --arg arg_name "${ASSET_NAME}" '{"name":$arg_name}' | curl --silent \
+              --request PATCH \
+              --url "${ASSET_URL}" \
+              --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+              --header "Accept: application/vnd.github.v3+json" \
+              --data @- \
+              --output asset_update.json
+            echo "Asset update done."
+            if test "$(cat asset_update.json | jq --raw-output '.name')"x != "${ASSET_NAME}"x
+            then
+              echo "Could not verify asset update"
+              exit -1
+            fi
+          done
