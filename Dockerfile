@@ -24,6 +24,14 @@ cp -a /${BOARD} /${BREV}
 pio run -d /${BREV}
 cp /${BREV}/.pio/build/${BOARD}/firmware.hex /out/${BREV}.hex
 
+export PLATFORMIO_BUILD_FLAGS=-DADS1015
+REV=ads1015
+BREV=${BOARD}_${REV}
+echo ${BREV} >> /revs.txt
+cp -a /${BOARD} /${BREV}
+pio run -d /${BREV}
+cp /${BREV}/.pio/build/${BOARD}/firmware.hex /out/${BREV}.hex
+
 
 BOARD=ATmega328PB
 
