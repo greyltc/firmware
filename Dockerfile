@@ -8,7 +8,10 @@ mkdir -p /out
 
 BOARD=megaatmega2560
 pio run -d /${BOARD}
-cp /${BOARD}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}.hex
+cp /${BOARD}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_adc.hex
+export PLATFORMIO_BUILD_FLAGS=-DNO_ADC
+pio run -d /${BOARD}
+cp /${BOARD}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_noadc.hex
 
 BOARD=ATmega328PB
 sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x50,g' /${BOARD}/src/firmware.cpp
