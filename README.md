@@ -7,7 +7,7 @@ Firmware design files for controlling the hardware from https://github.com/greyl
 ```
 git clone https://github.com/greyltc/firmware.git && cd firmware
 # optionally do hacking on the source code here
-docker buildx build --progress plain --target compile --tag fwbuilt --load .  # compile and save image
+docker buildx build --progress plain --target compile --tag fwbuilt --load .  # compile and save all build artifacts in a docker image
 docker buildx build --progress plain --target export --output type=local,dest=. .  # export built firmware to local fs
 ```
 You should now have various compiled firmware .hex files that are ready to flash.
