@@ -1,3 +1,4 @@
+[![CI](https://github.com/greyltc/firmware/actions/workflows/build.yml/badge.svg)](https://github.com/greyltc/firmware/actions/workflows/build.yml)
 # firmware
 Firmware design files for controlling the hardware from https://github.com/greyltc/electronics and/or https://github.com/greyltc/hardware
 
