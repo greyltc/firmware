@@ -2,120 +2,32 @@
 # firmware
 Firmware design files for controlling the hardware from https://github.com/greyltc/electronics and/or https://github.com/greyltc/hardware
 
-## Build
+## Usage
+### Build
 ```
 git clone https://github.com/greyltc/firmware.git && cd firmware
-docker buildx build --progress plain --target export --output type=local,dest=. .
+# do hacking here
+docker buildx build --progress plain --target compile --tag fwbuilt --load .  # compile and save image
+docker buildx build --progress plain --target export --output type=local,dest=. .  # export built firmware to local fs
 ```
 You should now have various compiled firmware .hex files that are ready to flash.
-
-## Prepare
-Install platformio (`yay -Syyu platformio` perhaps?)
+### Flash to hardware
+Now you might like to program the firmware you've built into some hardware.
+#### From docker
+If you've built with docker as described above, you could flash your hardware with the build artifacts in the fwbuilt image like this:
 ```
-git clone ${this_project}
-cd ${this_project}
-
-# make sure we have the framework&package we need
-pio platform install --with-package framework-arduino-avr atmelavr
-
-mkdir -p pio-main
-#platformio init --board ATmega2560 -d pio-main --project-option "lib_deps = framework-arduino-avr/Wire" --project-option "lib_extra_dirs = \$PROJECT_CORE_DIR/packages/framework-arduino-avr/libraries"
-platformio init --board megaatmega2560 -d pio-main
-pio lib -d pio-main install "arduino-libraries/Ethernet@^2.0.0"
-#pio lib -d pio-main install 342 # Adafruit's Arduino library for ADS1015/1115 ADCs (only needed for old hardware)
-(cd pio-main/src && ln -sf ../../main-uC/* .)
-
-mkdir -p pio-stepper
-# currently needed until my wire mods are in MCUdude/MiniCore
-platformio init --board ATmega328PB -d pio-stepper --project-option "lib_deps = framework-arduino-avr/Wire" --project-option "lib_extra_dirs = \$PROJECT_CORE_DIR/packages/framework-arduino-avr/libraries"
-(cd pio-stepper/src && ln -sf ../../stepper-uC/* .)
+docker run --network=none --device=/dev/ttyACM0 fwbuilt pio run --project-dir /megaatmega2560_adc --target upload
 ```
-
-## Usage
+where `/dev/ttyACM0` is the serial port device associated with the hardware you're flashing and `megaatmega2560_adc` is the name of the previously built firmware. You can list the names of the previously built firmwares with
 ```
-./compile-and-flash.sh pio-main # Build for main uC
-./compile-and-flash.sh pio-stepper # Build for stepper uC
-
-./compile-and-flash.sh pio-main fadsfdsafsad # list detected targets
-
-./compile-and-flash.sh pio-main /dev/ttyUSBX # flash main
-./compile-and-flash.sh pio-stepper /dev/ttyUSBX # flash stepper
+docker run fwbuilt cat /revs.txt
 ```
-
-### Misc PIO commands:
-build:
+#### Via docker
+If all you have is a firmware blob, you might be able to flash it via the a docker image with something like (for atmega2560):
 ```
-# for the stepper uC:
-pio run -d pio-stepper
-
-# for the main uC:
-pio run -d pio-main
+cat megaatmega2560_adc.hex | docker run --rm --interactive --network=none --device=/dev/ttyACM0 ghcr.io/greyltc-org/firmware-builder:20220218.0.109 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega2560 -C /root/.platformio/packages/tool-avrdude/avrdude.conf -c wiring -b 115200 -D -P "/dev/ttyACM0" -U flash:w:-:i
 ```
-
-flash:
+where `/dev/ttyACM0` is the serial port device associated with the hardware you're flashing and `megaatmega2560_adc.hex` is the firmware blob you have. Or (for ATmega328PB):
 ```
-#pio device list # to figure out where to upload
-MAIN_PORT=/dev/ttyACMX
-STEPPER_PORT=/dev/ttyACMX
-
-# for the stepper uC:
-pio run -d pio-stepper --target upload --upload-port ${STEPPER_PORT}
-
-# for the main uC:
-pio run -d pio-main --target upload --upload-port ${MAIN_PORT}
-```
-
-debug: 
-```
-# for the stepper uC:
-device monitor -b 115200 -p ${STEPPER_PORT}
-
-# for the main uC:
-device monitor -b 115200 -p ${MAIN_PORT}
-```
-
-## AVRDUDE
-### Flashing a .hex
-Flashing a raw .hex firmware file for the stepper driver might look something like this:
-```
-~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:w:.pio/build/ATmega328PB/firmware.hex:i
-```
-Main controller flash might look like this:
-```
-~/.platformio/packages/tool-avrdude/avrdude -v -p atmega2560 -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c wiring -b 115200 -D -P "/dev/ttyUSBX" -U flash:w:.pio/build/megaatmega2560/firmware.hex:i
-```
-### Dumping a .hex
-Dumping a .hex firmware file for the stepper driver might look like this:
-```
-~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:r:stepper_firmware_dump.hex:i
-```
-Consider repeating the read and write commands replacing `flash:` once each with `:eeprom`, `:hfuse`, `:lfuse`, `:efuse` though `man avrdude` shows many more memory types.  
-Main controller dump might look like this:
-```
-~/.platformio/packages/tool-avrdude/avrdude -v -p atmega2560 -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c wiring -b 115200 -D -P "/dev/ttyUSBX" -U flash:r:main_firmware_dump.hex:i
-```
-### Verifying
-You can verify a `:flash` firmware file on disk matches that in a device with:
-```
-~/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:v:file_on_disk.hex:i
-```
-
-## ng
-```
-sudo pacman -Syu dfu-util
-pio platform install --with-package framework-arduino-mbed "ststm32"
-mkdir -p pio-main-ng
-platformio init --board portenta_h7_m7 -d pio-main-ng
-pio lib -d pio-main-ng install "khoih-prog/MDNS_Generic"
-pio lib -d pio-main-ng uninstall openslab-osu/EthernetLarge
-pio lib -d pio-main-ng uninstall arduino-libraries/Ethernet
-pio lib -d pio-main-ng uninstall sstaub/Ethernet3
-pio lib -d pio-main-ng uninstall adafruit/Ethernet2
-pio lib -d pio-main-ng uninstall jandrassy/WiFiEspAT
-pio lib -d pio-main-ng uninstall arduino-libraries/WiFi101
-pio lib -d pio-main-ng uninstall khoih-prog/WiFiNINA_Generic
-find main-ng -mindepth 1 -exec ln -sfr {} pio-main-ng/src/ \;
-pio run -d pio-main-ng
-#pio run -d pio-main-ng --target upload
-dfu-util --download pio-main-ng/.pio/build/portenta_h7_m7/firmware.bin --alt 0 --dfuse-address=0x08040000:leave
+cat ATmega328PB_ax0.hex | docker run --rm --interactive --network=none --device=/dev/ttyACM0 ghcr.io/greyltc-org/firmware-builder:20220218.0.109 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:w:-:i
 ```
