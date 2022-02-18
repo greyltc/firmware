@@ -18,10 +18,7 @@ If you've built with docker as described above, you could flash your hardware wi
 ```
 docker run --network=none --device=/dev/ttyACM0 fwbuilt pio run --project-dir /megaatmega2560_adc --target upload
 ```
-where `/dev/ttyACM0` is the serial port device associated with the hardware you're flashing and `megaatmega2560_adc` is the name of the previously built firmware. You can list the names of the previously built firmwares with
-```
-docker run fwbuilt cat /revs.txt
-```
+where `/dev/ttyACM0` is the serial port device associated with the hardware you're flashing and `megaatmega2560_adc` is the name of the previously built firmware. You can list the names of the previously built firmwares with `docker run fwbuilt cat /revs.txt`.
 #### Via docker
 If all you have is a firmware blob, you might be able to flash it via the a docker image with something like (for atmega2560):
 ```
