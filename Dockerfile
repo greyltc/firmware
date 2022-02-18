@@ -7,25 +7,48 @@ RUN --network=none <<EOF
 mkdir -p /out
 
 BOARD=megaatmega2560
-pio run -d /${BOARD}
-cp /${BOARD}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_adc.hex
+touch /${BOARD}/revs.txt
+
+REV=adc
+cat ${REV} >> /${BOARD}/revs.txt
+cp -a /${BOARD} /${BOARD}_${REV}
+pio run -d /${BOARD}_${REV}
+cp /${BOARD}_${REV}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
+
 export PLATFORMIO_BUILD_FLAGS=-DNO_ADC
-pio run -d /${BOARD}
-cp /${BOARD}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_noadc.hex
+REV=noadc
+cat ${REV} >> /${BOARD}/revs.txt
+cp -a /${BOARD} /${BOARD}_${REV}
+pio run -d /${BOARD}_${REV}
+cp /${BOARD}_${REV}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
+
+
 
 BOARD=ATmega328PB
-sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x50,g' /${BOARD}/src/firmware.cpp
-pio run -d /${BOARD}
-cp /${BOARD}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_ax0.hex
-sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x51,g' /${BOARD}/src/firmware.cpp
-pio run -d /${BOARD}
-cp /${BOARD}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_ax1.hex
-sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x52,g' /${BOARD}/src/firmware.cpp
-pio run -d /${BOARD}
-cp /${BOARD}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_ax2.hex
+touch /${BOARD}/revs.txt
+
+REV=ax0
+cat ${REV} >> /${BOARD}/revs.txt
+cp -a /${BOARD} /${BOARD}_${REV}
+sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x50,g' /${BOARD}_${REV}/src/firmware.cpp
+pio run -d /${BOARD}_${REV}
+cp /${BOARD}_${REV}.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
+
+REV=ax1
+cat ${REV} >> /${BOARD}/revs.txt
+cp -a /${BOARD} /${BOARD}_${REV}
+sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x51,g' /${BOARD}_${REV}/src/firmware.cpp
+pio run -d /${BOARD}_${REV}
+cp /${BOARD}_${REV}.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
+
+REV=ax2
+cat ${REV} >> /${BOARD}/revs.txt
+cp -a /${BOARD} /${BOARD}_${REV}
+sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x52,g' /${BOARD}_${REV}/src/firmware.cpp
+pio run -d /${BOARD}_${REV}
+cp /${BOARD}_${REV}.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
 
 EOF
 
 FROM scratch AS export
 COPY --from=compile /out/* /
-
