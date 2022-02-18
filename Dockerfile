@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.3-labs
-FROM ghcr.io/greyltc-org/firmware-builder:20220216.0.104 as compile
+FROM ghcr.io/greyltc-org/firmware-builder:20220218.0.108 as compile
 COPY main-uC /megaatmega2560/src
 COPY stepper-uC /ATmega328PB/src
 RUN --network=none <<EOF
