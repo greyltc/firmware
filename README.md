@@ -12,7 +12,7 @@ docker buildx build --progress plain --target export --output type=local,dest=. 
 ```
 You should now have various compiled firmware .hex files that are ready to flash.
 ### Flash to hardware
-Now you might like to program the firmware you've built into some hardware.
+Follow this if you'd like to program something with the firmware you've built.
 #### From docker
 If you've built with docker as described above, you could flash your hardware with the build artifacts in the fwbuilt image like this:
 ```
