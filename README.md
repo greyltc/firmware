@@ -20,7 +20,7 @@ docker run --network=none --device=/dev/ttyACM0 fwbuilt pio run --project-dir /m
 ```
 where `/dev/ttyACM0` is the serial port device associated with the hardware you're flashing and `megaatmega2560_adc` is the name of the previously built firmware. You can list the names of the previously built firmwares with `docker run fwbuilt cat /revs.txt`.
 #### Via docker
-If all you have is a firmware blob, you might be able to flash it via the a docker image with something like (for atmega2560):
+If all you have is a firmware blob, you might be able to flash it via a docker image with something like (for atmega2560):
 ```
 cat megaatmega2560_adc.hex | docker run --rm --interactive --network=none --device=/dev/ttyACM0 ghcr.io/greyltc-org/firmware-builder:20220218.0.109 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega2560 -C /root/.platformio/packages/tool-avrdude/avrdude.conf -c wiring -b 115200 -D -P "/dev/ttyACM0" -U flash:w:-:i
 ```
