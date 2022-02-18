@@ -32,21 +32,21 @@ cat ${REV} >> /${BOARD}/revs.txt
 cp -a /${BOARD} /${BOARD}_${REV}
 sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x50,g' /${BOARD}_${REV}/src/firmware.cpp
 pio run -d /${BOARD}_${REV}
-cp /${BOARD}_${REV}.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
+cp /${BOARD}_${REV}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
 
 REV=ax1
 cat ${REV} >> /${BOARD}/revs.txt
 cp -a /${BOARD} /${BOARD}_${REV}
 sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x51,g' /${BOARD}_${REV}/src/firmware.cpp
 pio run -d /${BOARD}_${REV}
-cp /${BOARD}_${REV}.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
+cp /${BOARD}_${REV}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
 
 REV=ax2
 cat ${REV} >> /${BOARD}/revs.txt
 cp -a /${BOARD} /${BOARD}_${REV}
 sed --in-place 's,^#define I2C_SLAVE_ADDRESS.*,#define I2C_SLAVE_ADDRESS 0x52,g' /${BOARD}_${REV}/src/firmware.cpp
 pio run -d /${BOARD}_${REV}
-cp /${BOARD}_${REV}.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
+cp /${BOARD}_${REV}/.pio/build/${BOARD}/firmware.hex /out/${BOARD}_${REV}.hex
 
 EOF
 
