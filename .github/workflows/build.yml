@@ -60,7 +60,7 @@ jobs:
         with:
           target: export
           outputs: type=local,dest=out
-          no-cache: true
+          context: .
 
       - name: Tag & Push
         if: github.event_name != 'pull_request'
