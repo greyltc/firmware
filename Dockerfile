@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.3-labs
-FROM ghcr.io/greyltc-org/firmware-builder:20220219.0.110 as compile
+FROM ghcr.io/greyltc-org/firmware-builder:20220219.0.111 as compile
 COPY main-uC /megaatmega2560/src
 COPY stepper-uC /ATmega328PB/src
 RUN --network=none <<EOF
@@ -12,7 +12,7 @@ touch /revs.txt
 
 BOARD=megaatmega2560
 
-REV=adc
+REV=baseline
 BREV=${BOARD}_${REV}
 echo ${BREV} >> /revs.txt
 cp -a /${BOARD} /${BREV}
@@ -26,6 +26,7 @@ echo ${BREV} >> /revs.txt
 cp -a /${BOARD} /${BREV}
 pio run -d /${BREV}
 cp /${BREV}/.pio/build/${BOARD}/firmware.hex /out/${BREV}.hex
+unset PLATFORMIO_BUILD_FLAGS
 
 export PLATFORMIO_BUILD_FLAGS=-DADS1015
 REV=ads1015
@@ -34,6 +35,7 @@ echo ${BREV} >> /revs.txt
 cp -a /${BOARD} /${BREV}
 pio run -d /${BREV}
 cp /${BREV}/.pio/build/${BOARD}/firmware.hex /out/${BREV}.hex
+unset PLATFORMIO_BUILD_FLAGS
 
 
 BOARD=ATmega328PB
