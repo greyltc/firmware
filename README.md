@@ -26,5 +26,5 @@ cat megaatmega2560_adc.hex | docker run --rm --interactive --network=none --devi
 ```
 where `/dev/ttyACM0` is the serial port device associated with the hardware you're flashing and `megaatmega2560_adc.hex` is the firmware blob you have. Or (for ATmega328PB):
 ```
-cat ATmega328PB_ax0.hex | docker run --rm --interactive --network=none --device=/dev/ttyACM0 ghcr.io/greyltc-org/firmware-builder:20220218.0.109 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C ~/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSBX" -U flash:w:-:i
+cat ATmega328PB_ax0.hex | docker run --rm --interactive --network=none --device=/dev/ttyUSB1 ghcr.io/greyltc-org/firmware-builder:20220218.0.109 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C /root/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSB1" -U flash:w:-:i
 ```
