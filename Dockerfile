@@ -11,6 +11,7 @@ mkdir -p /out
 touch /revs.txt
 
 BOARD=megaatmega2560
+grep -r 'define FIRMWARE_VER' /${BOARD}
 
 REV=baseline
 BREV=${BOARD}_${REV}
@@ -47,6 +48,7 @@ cp /${BREV}/.pio/build/${BOARD}/firmware.hex /out/${BREV}.hex
 
 
 BOARD=ATmega328PB
+grep -r 'define FIRMWARE_VER' /${BOARD}
 
 REV=ax0
 BREV=${BOARD}_${REV}
