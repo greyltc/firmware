@@ -4,6 +4,9 @@ COPY main-uC /megaatmega2560/src
 COPY stepper-uC /ATmega328PB/src
 RUN --network=none <<EOF
 #!/usr/bin/env bash
+set -e
+set -o pipefail
+
 mkdir -p /out
 touch /revs.txt
 
