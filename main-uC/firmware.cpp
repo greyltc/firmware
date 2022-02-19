@@ -528,16 +528,15 @@ void setup() {
   digitalWrite(HARDWARE_SPI_CS, HIGH); //deselect
   pinMode(HARDWARE_SPI_CS, OUTPUT);
 
-#ifdef BIT_BANG_SPI
   digitalWrite(PE_CS_PIN, HIGH); //deselect
   pinMode(PE_CS_PIN, OUTPUT); // get ready to chipselect
 
+#ifdef BIT_BANG_SPI
   digitalWrite(PE_SCK_PIN, LOW); //clock starts low
   pinMode(PE_SCK_PIN, OUTPUT);
 
   digitalWrite(PE_MOSI_PIN, LOW); //data starts low
   pinMode(PE_MOSI_PIN, OUTPUT);
-
   pinMode(PE_MISO_PIN, INPUT);
 
   // an init procedure to try to ensure the SPI bus is ready under all conditions
