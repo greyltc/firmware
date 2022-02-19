@@ -72,7 +72,7 @@ const unsigned char this_mac[6] = SNAITH_MAC;
 
 #ifndef NO_ADC
 #ifdef ADS1015
-#include <Adafruit_ADS1015.h>
+#include <Adafruit_ADS1X15.h>
 #endif //ADS1015
 #endif //NO_ADC
 
