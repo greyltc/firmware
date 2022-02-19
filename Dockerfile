@@ -37,7 +37,6 @@ pio run -d /${BREV}
 cp /${BREV}/.pio/build/${BOARD}/firmware.hex /out/${BREV}.hex
 unset PLATFORMIO_BUILD_FLAGS
 
-
 REV=no_spi_bb
 BREV=${BOARD}_${REV}
 echo ${BREV} >> /revs.txt
@@ -45,7 +44,6 @@ cp -a /${BOARD} /${BREV}
 sed --in-place 's,^#define BIT_BANG_SPI,//#define BIT_BANG_SPI,g' /${BREV}/src/firmware.cpp
 pio run -d /${BREV}
 cp /${BREV}/.pio/build/${BOARD}/firmware.hex /out/${BREV}.hex
-unset PLATFORMIO_BUILD_FLAGS
 
 
 BOARD=ATmega328PB
