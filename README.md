@@ -28,3 +28,25 @@ where `/dev/ttyACM0` is the serial port device associated with the hardware you'
 ```
 cat ATmega328PB_ax0.hex | docker run --rm --interactive --network=none --device=/dev/ttyUSB1 ghcr.io/greyltc-org/firmware-builder:20220219.0.115 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C /root/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSB1" -U flash:w:-:i
 ```
+##### Directly from GitHub release
+Latest:
+```
+curl --location --silent https://github.com/greyltc/firmware/releases/latest/download/megaatmega2560_baseline.hex | docker run --rm --interactive --network=none --device=/dev/ttyACM0 ghcr.io/greyltc-org/firmware-builder:20220219.0.115 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega2560 -C /root/.platformio/packages/tool-avrdude/avrdude.conf -c wiring -b 115200 -D -P "/dev/ttyACM0" -U flash:w:-:i
+```
+or
+```
+curl --location --silent https://github.com/greyltc/firmware/releases/latest/download/ATmega328PB_ax0.hex | docker run --rm --interactive --network=none --device=/dev/ttyUSB1 ghcr.io/greyltc-org/firmware-builder:20220219.0.115 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C /root/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSB1" -U flash:w:-:i
+```
+Specific version:
+```
+curl --location --silent https://github.com/greyltc/firmware/releases/download/v20220219.0.39/megaatmega2560_baseline.hex | docker run --rm --interactive --network=none --device=/dev/ttyACM0 ghcr.io/greyltc-org/firmware-builder:20220219.0.115 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega2560 -C /root/.platformio/packages/tool-avrdude/avrdude.conf -c wiring -b 115200 -D -P "/dev/ttyACM0" -U flash:w:-:i
+```
+### Dump from hardware
+For atmega2560 on `/dev/ttyACM0` flash memory dumped into an Intel hex file, `dump.hex`:
+```
+docker run --rm --interactive --network=none --device=/dev/ttyACM0 ghcr.io/greyltc-org/firmware-builder:20220219.0.115 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega2560 -C /root/.platformio/packages/tool-avrdude/avrdude.conf -c wiring -b 115200 -D -P "/dev/ttyACM0" -U flash:r:-:i > dump.hex
+```
+For atmega328pb on `/dev/ttyUSB1` flash memory dumped into an Intel hex file, `dump.hex`:
+```
+docker run --rm --interactive --network=none --device=/dev/ttyUSB1 ghcr.io/greyltc-org/firmware-builder:20220219.0.115 /root/.platformio/packages/tool-avrdude/avrdude -v -p atmega328pb -C /root/.platformio/packages/tool-avrdude/avrdude.conf -c arduino -b 115200 -D -P "/dev/ttyUSB1" -U flash:R:-:i > dump.hex
+```
