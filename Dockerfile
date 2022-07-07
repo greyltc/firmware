@@ -48,8 +48,8 @@ pio run -d /${BREV}
 cp /${BREV}/.pio/build/${BOARD}/firmware.hex /out/${BREV}.hex
 
 
-rm /${BOARD}
-cp -a /${BOARD}sq /${BOARD}
+rm -r /${BOARD}/src
+cp -a /${BOARD}sq/src /${BOARD}/src
 grep -r 'define FIRMWARE_VER' /${BOARD}
 
 REV=squirrel

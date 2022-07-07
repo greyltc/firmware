@@ -7,18 +7,14 @@
 // the slave i2c addresses
 #define MUX_ADDR 0x70
 // the switch MCPs
-#define AB0_ADDR = 0x20  // shared address with AB4, will be selected via mux
-#define CD0_ADDR = 0x21  // shared address with CD4, will be selected via mux
-#define AB1_ADDR = 0x22
-#define CD1_ADDR = 0x23
-#define AB2_ADDR = 0x24
-#define CD2_ADDR = 0x25
-#define AB3_ADDR = 0x26
-#define CD3_ADDR = 0x27
-
-// an array of slave i2c addresses to be spoofed
-const unit8_t emulating[9] = {CD3_ADDR, AB3_ADDR, CD2_ADDR, AB2_ADDR, CD1_ADDR, AB1_ADDR, CD0_ADDR, AB0_ADDR, MUX_ADDR}
-
+#define AB0_ADDR 0x20  // shared address with AB4, will be selected via mux
+#define CD0_ADDR 0x21  // shared address with CD4, will be selected via mux
+#define AB1_ADDR 0x22
+#define CD1_ADDR 0x23
+#define AB2_ADDR 0x24
+#define CD2_ADDR 0x25
+#define AB3_ADDR 0x26
+#define CD3_ADDR 0x27
 
 #ifdef DEBUG
 #  define D(x) (x)
@@ -27,7 +23,9 @@ const unit8_t emulating[9] = {CD3_ADDR, AB3_ADDR, CD2_ADDR, AB2_ADDR, CD1_ADDR, 
 #endif // DEBUG
 
 #include <Arduino.h>
+#include <SPI.h>  // TODO: figure out why I need this
 #include <Wire.h>
+#include <avr/wdt.h> /*Watchdog timer handling*/
 
 // no operation
 #define NOP __asm__ __volatile__ ("nop\n\t")
@@ -147,6 +145,10 @@ void resetFlagsInit(void)
 // utility functions
 void reset(void);
 void reset_reason(void);
+void do_every_short_while(void);
+
+// an array of slave i2c addresses to be spoofed
+const unsigned char emulating[9] = {CD3_ADDR, AB3_ADDR, CD2_ADDR, AB2_ADDR, CD1_ADDR, AB1_ADDR, CD0_ADDR, AB0_ADDR, MUX_ADDR};
 
 
 void setup() {
@@ -164,12 +166,12 @@ void setup() {
   wdt_enable(WDTO_8S);
   
   // setup i2c slave spoofing
-  uint8_t spoofmask = 0;
-  for(int i=1; i<sizeAddresses; ++i){
-    mask |= (addresses[0] ^ addresses[i]);
+  unsigned char spoofmask = 0;
+  for(int i=1; i<(sizeof(emulating)); ++i){
+    spoofmask |= (emulating[0] ^ emulating[i]);
   }
-  TWAMR = mask << 1;
-  Wire.begin(addresses[0]);
+  TWAMR = spoofmask << 1;
+  Wire.begin(emulating[0]);
   // the wire module now times out and resets itsself to prevent lockups
   //Wire.setWireTimeout(I2C_TIMEOUT_US, true);
 
