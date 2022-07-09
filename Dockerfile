@@ -1,5 +1,5 @@
 # syntax=docker.io/docker/dockerfile:1.4.2
-FROM ghcr.io/greyltc-org/firmware-builder:20220708.0.142 as compile
+FROM ghcr.io/greyltc-org/firmware-builder:20220709.0.143 as compile
 #FROM ghcr.io/greyltc-org/firmware-builder:20220220.0.117 as compile
 COPY main-uC /megaatmega2560/src
 COPY squirrel /megaatmega2560sq/src
