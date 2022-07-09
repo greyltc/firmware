@@ -174,6 +174,8 @@ void setup() {
   Wire.begin(emulating[0]);
   // the wire module now times out and resets itsself to prevent lockups
   //Wire.setWireTimeout(I2C_TIMEOUT_US, true);
+  Wire.onReceive(rxhandler)
+  Wire.onRequest(rqhandler)
 
   // bitmask for which port expander chips were discovered
   //uint32_t connected_devices = 0x00000000;
@@ -204,6 +206,43 @@ void loop() {
   if (loop_counter%short_while_loops == 0){
     do_every_short_while();
   }
+}
+
+void rqhandler (){
+  unsigned char slave_address = TWDR >> 1;
+  switch (slave_address) {
+    case (MUX_ADDR):
+      D(Serial.println(F("Got MUX")));
+      break;
+
+    case (AB0_ADDR):
+      D(Serial.println(F("Got AB0")));
+      break;
+
+    case (CD0_ADDR):
+      D(Serial.println(F("Got CD0")));
+      break;
+
+    case (AB1_ADDR):
+      D(Serial.println(F("Got AB1")));
+      break;
+
+    default:
+      D(Serial.print(F("Got strange: ")));
+      D(Serial.println(slave_address, HEX));
+      break;
+  }
+}
+
+void rxhandler(int nbytes) {
+  D(Serial.print(F("rxhandler with: ")));
+  D(Serial.println(nbytes));
+  while (1 < Wire.available()) { // loop through all but the last
+    char c = Wire.read(); // receive byte as a character
+    D(Serial.print(c));         // print the character
+  }
+  int x = Wire.read();    // receive byte as an integer
+  D(Serial.println(x));         // print the integer
 }
 
 // asks the dog to reset the uc (takes 15ms)
