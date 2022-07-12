@@ -184,6 +184,9 @@ void setup() {
   // bitmask for which port expander chips were discovered
   //uint32_t connected_devices = 0x00000000;
   //connected_devices = mcp_setup(MCP_SPI);
+
+  pinMode(21, INPUT_PULLUP);
+  pinMode(20, INPUT_PULLUP);
   
   D(Serial.println(F("________End Setup Function________")));
 }
