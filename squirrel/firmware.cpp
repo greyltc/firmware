@@ -174,6 +174,7 @@ void setup() {
   for(unsigned int i=1; i<(sizeof(emulating)); ++i){
     spoofmask |= (emulating[0] ^ emulating[i]);
   }
+  spoofmask = 0xff;
   TWAMR = spoofmask << 1;
   Wire.begin(emulating[0]);
   // the wire module now times out and resets itsself to prevent lockups
