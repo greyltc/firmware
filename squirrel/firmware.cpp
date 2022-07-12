@@ -205,7 +205,7 @@ bool mux_state = false;
 // main program loop
 void loop() {
   loop_counter++;
-  delay(100);
+  delayMicroseconds(1000);
 
   if (loop_counter%short_while_loops == 0){
     do_every_short_while();
