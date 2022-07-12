@@ -147,6 +147,10 @@ void reset(void);
 void reset_reason(void);
 void do_every_short_while(void);
 
+// handlers
+void rqhandler (void);
+void rxhandler (int nbytes);
+
 // an array of slave i2c addresses to be spoofed
 const unsigned char emulating[9] = {CD3_ADDR, AB3_ADDR, CD2_ADDR, AB2_ADDR, CD1_ADDR, AB1_ADDR, CD0_ADDR, AB0_ADDR, MUX_ADDR};
 
@@ -167,15 +171,15 @@ void setup() {
   
   // setup i2c slave spoofing
   unsigned char spoofmask = 0;
-  for(int i=1; i<(sizeof(emulating)); ++i){
+  for(unsigned int i=1; i<(sizeof(emulating)); ++i){
     spoofmask |= (emulating[0] ^ emulating[i]);
   }
   TWAMR = spoofmask << 1;
   Wire.begin(emulating[0]);
   // the wire module now times out and resets itsself to prevent lockups
   //Wire.setWireTimeout(I2C_TIMEOUT_US, true);
-  Wire.onReceive(rxhandler)
-  Wire.onRequest(rqhandler)
+  Wire.onReceive(rxhandler);
+  Wire.onRequest(rqhandler);
 
   // bitmask for which port expander chips were discovered
   //uint32_t connected_devices = 0x00000000;
