@@ -26,6 +26,7 @@
 #include <SPI.h>  // TODO: figure out why I need this
 #include <Wire.h>
 #include <avr/wdt.h> /*Watchdog timer handling*/
+#include <inttypes.h>  // for sane type defs
 
 // no operation
 #define NOP __asm__ __volatile__ ("nop\n\t")
@@ -154,6 +155,9 @@ void rxhandler (int nbytes);
 // an array of slave i2c addresses to be spoofed
 const unsigned char emulating[9] = {CD3_ADDR, AB3_ADDR, CD2_ADDR, AB2_ADDR, CD1_ADDR, AB1_ADDR, CD0_ADDR, AB0_ADDR, MUX_ADDR};
 
+// TX/RX buffer
+#define TR_BUF_LEN 24
+uint8_t trb[TR_BUF_LEN] = { 0x00 };
 
 void setup() {
   D(Serial.begin(115200)); // serial port for debugging
@@ -174,11 +178,16 @@ void setup() {
   for(unsigned int i=1; i<(sizeof(emulating)); ++i){
     spoofmask |= (emulating[0] ^ emulating[i]);
   }
-  spoofmask = 0xff;
+
+  //spoofmask = 0xff;
   TWAMR = spoofmask << 1;
+  D(Serial.print("Spoofmask: 0x"));
+  D(Serial.println(spoofmask, HEX));
   Wire.begin(emulating[0]);
+  D(Serial.print("Main address: 0x"));
+  D(Serial.println(emulating[0], HEX));
   // the wire module now times out and resets itsself to prevent lockups
-  //Wire.setWireTimeout(I2C_TIMEOUT_US, true);
+  Wire.setWireTimeout(I2C_TIMEOUT_US, true);
   Wire.onReceive(rxhandler);
   Wire.onRequest(rqhandler);
 
@@ -186,8 +195,8 @@ void setup() {
   //uint32_t connected_devices = 0x00000000;
   //connected_devices = mcp_setup(MCP_SPI);
 
-  pinMode(21, INPUT_PULLUP);
-  pinMode(20, INPUT_PULLUP);
+  //pinMode(21, INPUT_PULLUP);
+  //pinMode(20, INPUT_PULLUP);
   
   D(Serial.println(F("________End Setup Function________")));
 }
@@ -216,41 +225,78 @@ void loop() {
   }
 }
 
+// handles a read request from the master
 void rqhandler (){
-  unsigned char slave_address = TWDR >> 1;
+  //unsigned char slave_address = TWDR >> 1;
+  unsigned char slave_address = Wire.getLastSlaveAddress();
   switch (slave_address) {
     case (MUX_ADDR):
-      D(Serial.println(F("Got MUX")));
+      D(Serial.println(F("Got MUX request")));
       break;
 
     case (AB0_ADDR):
-      D(Serial.println(F("Got AB0")));
+      D(Serial.println(F("Got AB0 request")));
+      Wire.write(0xDE);
       break;
 
     case (CD0_ADDR):
-      D(Serial.println(F("Got CD0")));
+      D(Serial.println(F("Got CD0 request")));
+      Wire.write(0xDE);
       break;
 
     case (AB1_ADDR):
       D(Serial.println(F("Got AB1")));
+      Wire.write(0xDE);
       break;
 
     default:
       D(Serial.print(F("Got strange: ")));
       D(Serial.println(slave_address, HEX));
+      Wire.write(0xDE);
       break;
   }
 }
 
+// handles a write from the master
 void rxhandler(int nbytes) {
-  D(Serial.print(F("rxhandler with: ")));
+  unsigned char slave_address = Wire.getLastSlaveAddress();
+  D(Serial.print(F("rxhandler. Master would like to send this many bytes: ")));
   D(Serial.println(nbytes));
+  D(Serial.print(F("to slave address: 0x")));
+  D(Serial.println(slave_address, HEX));
+
+  uint8_t i = 0; // rx byte counter
+  D(Serial.print(F("the bytes are: ")));
   while (1 < Wire.available()) { // loop through all but the last
-    char c = Wire.read(); // receive byte as a character
-    D(Serial.print(c));         // print the character
+    uint8_t c = Wire.read(); // receive byte
+    D(Serial.print(F("0x")));
+    D(Serial.print(c, HEX));         // print the character
+    D(Serial.print(F(" ")));
+    trb[i] = c;  // store the rx'd byte in a buffer
+    i++;
   }
-  int x = Wire.read();    // receive byte as an integer
-  D(Serial.println(x));         // print the integer
+  switch (slave_address) {
+    case (MUX_ADDR):
+      D(Serial.println(F("I think that's i2c MUX")));
+      break;
+
+    case (AB0_ADDR):
+      D(Serial.println(F("I think that's AB0")));
+      break;
+
+    case (CD0_ADDR):
+      D(Serial.println(F("I think that's CD0")));
+      break;
+
+    case (AB1_ADDR):
+      D(Serial.println(F("I think that's AB1")));
+      break;
+
+    default:
+      D(Serial.print(F("What's that address: ")));
+      D(Serial.println(slave_address, HEX));
+      break;
+  }
 }
 
 // asks the dog to reset the uc (takes 15ms)
