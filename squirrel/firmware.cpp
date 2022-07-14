@@ -159,6 +159,9 @@ const unsigned char emulating[9] = {CD3_ADDR, AB3_ADDR, CD2_ADDR, AB2_ADDR, CD1_
 #define TR_BUF_LEN 24
 uint8_t trb[TR_BUF_LEN] = { 0x00 };
 
+// detection response
+uint8_t resp = 0x00;
+
 void setup() {
   D(Serial.begin(115200)); // serial port for debugging
   D(Serial.println(F("________Begin Setup Function________")));
@@ -181,11 +184,11 @@ void setup() {
 
   //spoofmask = 0xff;
   TWAMR = spoofmask << 1;
-  D(Serial.print("Spoofmask: 0x"));
-  D(Serial.println(spoofmask, HEX));
+  D(Serial.print("TWAM: 0x"));
+  D(Serial.println(TWAMR>>1, HEX));
   Wire.begin(emulating[0]);
-  D(Serial.print("Main address: 0x"));
-  D(Serial.println(emulating[0], HEX));
+  D(Serial.print("TWA: 0x"));
+  D(Serial.println(TWAR>>1, HEX));
   // the wire module now times out and resets itsself to prevent lockups
   Wire.setWireTimeout(I2C_TIMEOUT_US, true);
   Wire.onReceive(rxhandler);
@@ -229,73 +232,153 @@ void loop() {
 void rqhandler (){
   //unsigned char slave_address = TWDR >> 1;
   unsigned char slave_address = Wire.getLastSlaveAddress();
+  D(Serial.print(F("Master would like some data from 0x")));
+  D(Serial.print(slave_address, HEX));
+  D(Serial.print(F(" (")));
   switch (slave_address) {
     case (MUX_ADDR):
-      D(Serial.println(F("Got MUX request")));
+      D(Serial.println(F("MUX)")));
       break;
 
     case (AB0_ADDR):
-      D(Serial.println(F("Got AB0 request")));
-      Wire.write(0xDE);
+      D(Serial.print(F("AB0) sending: 0x")));
+      D(Serial.println(resp, HEX));
+      Wire.write(resp);
       break;
 
     case (CD0_ADDR):
-      D(Serial.println(F("Got CD0 request")));
-      Wire.write(0xDE);
+      D(Serial.print(F("CD0) sending: 0x")));
+      D(Serial.println(resp, HEX));
+      Wire.write(resp);
       break;
 
     case (AB1_ADDR):
-      D(Serial.println(F("Got AB1")));
-      Wire.write(0xDE);
+      D(Serial.print(F("AB1) sending: 0x")));
+      D(Serial.println(resp, HEX));
+      Wire.write(resp);
+      break;
+
+    case (CD1_ADDR):
+      D(Serial.print(F("CD1) sending: 0x")));
+      D(Serial.println(resp, HEX));
+      Wire.write(resp);
+      break;
+
+    case (AB2_ADDR):
+      D(Serial.print(F("AB2) sending: 0x")));
+      D(Serial.println(resp, HEX));
+      Wire.write(resp);
+      break;
+
+    case (CD2_ADDR):
+      D(Serial.print(F("CD2) sending: 0x")));
+      D(Serial.println(resp, HEX));
+      Wire.write(resp);
+      break;
+
+    case (AB3_ADDR):
+      D(Serial.print(F("AB3) sending: 0x")));
+      D(Serial.println(resp, HEX));
+      Wire.write(resp);
+      break;
+
+    case (CD3_ADDR):
+      D(Serial.print(F("CD3) sending: 0x")));
+      D(Serial.println(resp, HEX));
+      Wire.write(resp);
       break;
 
     default:
-      D(Serial.print(F("Got strange: ")));
-      D(Serial.println(slave_address, HEX));
-      Wire.write(0xDE);
+      D(Serial.print(F("====UNKNOWN====)")));
+      D(Serial.println(resp, HEX));
+      Wire.write(resp);
       break;
   }
+  
 }
 
 // handles a write from the master
 void rxhandler(int nbytes) {
+  uint8_t c;
+  int i;
+  int j;
   unsigned char slave_address = Wire.getLastSlaveAddress();
-  D(Serial.print(F("rxhandler. Master would like to send this many bytes: ")));
-  D(Serial.println(nbytes));
-  D(Serial.print(F("to slave address: 0x")));
-  D(Serial.println(slave_address, HEX));
+  D(Serial.print(F("Master would send ")));
+  D(Serial.print(nbytes));
+  D(Serial.print(F(" byte(s) to a slave with address 0x")));
+  D(Serial.print(slave_address, HEX));
+  D(Serial.print(F(" (")));
 
-  uint8_t i = 0; // rx byte counter
-  D(Serial.print(F("the bytes are: ")));
-  while (1 < Wire.available()) { // loop through all but the last
-    uint8_t c = Wire.read(); // receive byte
-    D(Serial.print(F("0x")));
-    D(Serial.print(c, HEX));         // print the character
-    D(Serial.print(F(" ")));
-    trb[i] = c;  // store the rx'd byte in a buffer
-    i++;
-  }
   switch (slave_address) {
     case (MUX_ADDR):
-      D(Serial.println(F("I think that's i2c MUX")));
+      D(Serial.print(F("i2c MUX)")));
       break;
 
     case (AB0_ADDR):
-      D(Serial.println(F("I think that's AB0")));
+      D(Serial.print(F("AB0)    ")));
       break;
 
     case (CD0_ADDR):
-      D(Serial.println(F("I think that's CD0")));
+      D(Serial.print(F("CD0)    ")));
       break;
 
     case (AB1_ADDR):
-      D(Serial.println(F("I think that's AB1")));
+      D(Serial.print(F("AB1)    ")));
+      break;
+
+    case (CD1_ADDR):
+      D(Serial.print(F("CD1)    ")));
+      break;
+
+    case (AB2_ADDR):
+      D(Serial.print(F("AB2)    ")));
+      break;
+
+    case (CD2_ADDR):
+      D(Serial.print(F("CD2)    ")));
+      break;
+
+    case (AB3_ADDR):
+      D(Serial.print(F("AB3)    ")));
+      break;
+
+    case (CD3_ADDR):
+      D(Serial.print(F("CD3)    ")));
       break;
 
     default:
-      D(Serial.print(F("What's that address: ")));
-      D(Serial.println(slave_address, HEX));
+      D(Serial.print(F("UNKNOWN)")));
       break;
+  }
+
+  i = nbytes; // rx byte counter
+  j = 0;
+  D(Serial.print(F(" and those bytes are: ")));
+  while (i > 0) { // loop through the bytes
+    c = Wire.read(); // receive byte
+    D(Serial.print(F("0x")));
+    D(Serial.print(c, HEX));         // print the character
+    D(Serial.print(F(" ")));
+    trb[j] = c;  // store the rx'd byte in a buffer
+    i--;
+    j++;
+  }
+  
+  // uint8_t i = 0; // rx byte counter
+  // D(Serial.print(F("The bytes are: ")));
+  // while (0 < Wire.available()) { // loop through all but the last
+  //   uint8_t c = Wire.read(); // receive byte
+  //   D(Serial.print(F("0x")));
+  //   D(Serial.print(c, HEX));         // print the character
+  //   D(Serial.print(F(" ")));
+  //   trb[i] = c;  // store the rx'd byte in a buffer
+  //   i++;
+  // }
+
+  D(Serial.println());
+  if ((nbytes == 2) && (trb[0] == 0x6)){
+    D(Serial.println(F("saving...")));
+    resp = trb[1];
   }
 }
 
