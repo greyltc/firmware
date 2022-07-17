@@ -51,7 +51,7 @@ extern "C" {
 // create version string
 #define STRINGIFY0(s) # s
 #define STRINGIFY(s) STRINGIFY0(s)
-#define FIRMWARE_VER "20220714.0.67"
+#define FIRMWARE_VER "20220717.0.68"
 
 #define BIT_SET(VALUE, BIT_POSITION) ((VALUE) |= (1<<(BIT_POSITION)))
 #define BIT_CLEAR(VALUE, BIT_POSITION) ((VALUE) &= ~(1<<(BIT_POSITION)))
