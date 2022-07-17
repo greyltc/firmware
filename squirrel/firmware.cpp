@@ -1,5 +1,5 @@
 // when DEBUG is defined, a serial comms interface will be brought up over USB to print out some debug info
-#define DEBUG
+//#define DEBUG
 
 // when NO_LED is defined, the LED is disabled so that it doesn't interfere with SPI SCK on boards like UNO
 //#define NO_LED
@@ -7,14 +7,14 @@
 // the slave i2c addresses
 #define MUX_ADDR 0x70
 // the switch MCPs
-#define AB0_ADDR 0x20  // shared address with AB4, will be selected via mux
-#define CD0_ADDR 0x21  // shared address with CD4, will be selected via mux
-#define AB1_ADDR 0x22
-#define CD1_ADDR 0x23
-#define AB2_ADDR 0x24
-#define CD2_ADDR 0x25
-#define AB3_ADDR 0x26
-#define CD3_ADDR 0x27
+#define AD_12A 0x20  // shared address with 12E, will be selected via i2c mux
+#define AD_34A 0x21  // shared address with 34E, will be selected via i2c mux
+#define AD_12B 0x22
+#define AD_34B 0x23
+#define AD_12C 0x24
+#define AD_34C 0x25
+#define AD_12D 0x26
+#define AD_34D 0x27
 
 #ifdef DEBUG
 #  define D(x) (x)
@@ -48,22 +48,58 @@
 
 //#define TCA9546_ADDRESS 0x70
 
+#define RELAY_1A_PIN 30
+#define RELAY_1B_PIN 31
+#define RELAY_1C_PIN 32
+#define RELAY_1D_PIN 33
+#define RELAY_1E_PIN 34
+#define RELAY_2A_PIN 35
+#define RELAY_2B_PIN 36
+#define RELAY_2C_PIN 37
+#define RELAY_2D_PIN 38
+#define RELAY_2E_PIN 39
+#define RELAY_3A_PIN 40
+#define RELAY_3B_PIN 41
+#define RELAY_3C_PIN 42
+#define RELAY_3D_PIN 43
+#define RELAY_3E_PIN 44
+#define RELAY_4A_PIN 45
+#define RELAY_4B_PIN 46
+#define RELAY_4C_PIN 47
+#define RELAY_4D_PIN 48
+#define RELAY_4E_PIN 49
+
+  /*
+  *    ====otter substrate grid====
+  *     --------------------------
+  *    |       o                  |
+  *    | 4E   4D   4C   4B   4A   |
+  *    |                          |
+  *    | 3E   3D   3C   3B   3A   |
+  *    |                          |   --> mux box connections
+  *    | 2E   2D   2C   2B   2A   |   -->    this side
+  *    |                          |
+  *    | 1E   1D   1C   1B   1A   |
+  *    |                          |
+  *     --------------------------
+  *  o = orientation hole
+  */
 
 // otter relay addresses (the actual I2C addresses used are 0x40 | this value)
 //const char OMUX_ADDR[10] = {0x00, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
 
 // otter relay I2C MUX channels
 //const char OMUX_CHAN[10] = {0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01};
-//OMUX_XXXX[0] -- > serves relay banks 1 and 2 on the bottom (0th) relay board: substrates A0 & B0
-//OMUX_XXXX[1] -- > serves relay banks 3 and 4 on the bottom (0th) relay board: substrates C0 & D0
-//OMUX_XXXX[2] -- > serves relay banks 1 and 2 on the        (1st) relay board: substrates A1 & B1
-//OMUX_XXXX[3] -- > serves relay banks 3 and 4 on the        (1st) relay board: substrates C1 & C1
-//OMUX_XXXX[4] -- > serves relay banks 1 and 2 on the        (2nd) relay board: substrates A2 & B2
-//OMUX_XXXX[5] -- > serves relay banks 3 and 4 on the        (2nd) relay board: substrates C2 & D2
-//OMUX_XXXX[6] -- > serves relay banks 1 and 2 on the        (3rd) relay board: substrates A3 & B3
-//OMUX_XXXX[7] -- > serves relay banks 3 and 4 on the        (3rd) relay board: substrates C3 & D3
-//OMUX_XXXX[8] -- > serves relay banks 1 and 2 on the top    (4th) relay board: substrates A4 & B4
-//OMUX_XXXX[9] -- > serves relay banks 3 and 4 on the top    (4th) relay board: substrates C4 & D4
+//OMUX_XXXX[0] -- > serves relay banks 1 and 2 on the bottom (0th) relay board: substrates 1A & 2A
+//OMUX_XXXX[1] -- > serves relay banks 3 and 4 on the bottom (0th) relay board: substrates 3A & 4A
+//OMUX_XXXX[2] -- > serves relay banks 1 and 2 on the        (1st) relay board: substrates 1B & 2B
+//OMUX_XXXX[3] -- > serves relay banks 3 and 4 on the        (1st) relay board: substrates 3B & 4B
+//OMUX_XXXX[4] -- > serves relay banks 1 and 2 on the        (2nd) relay board: substrates 1C & 2C
+//OMUX_XXXX[5] -- > serves relay banks 3 and 4 on the        (2nd) relay board: substrates 3C & 4C
+//OMUX_XXXX[6] -- > serves relay banks 1 and 2 on the        (3rd) relay board: substrates 1D & 2D
+//OMUX_XXXX[7] -- > serves relay banks 3 and 4 on the        (3rd) relay board: substrates 3D & 4D
+//OMUX_XXXX[8] -- > serves relay banks 1 and 2 on the top    (4th) relay board: substrates 1E & 2E
+//OMUX_XXXX[9] -- > serves relay banks 3 and 4 on the top    (4th) relay board: substrates 3E & 4E
 
 
 // switch layouts
@@ -153,7 +189,7 @@ void rqhandler (void);
 void rxhandler (int nbytes);
 
 // an array of slave i2c addresses to be spoofed
-const unsigned char emulating[9] = {CD3_ADDR, AB3_ADDR, CD2_ADDR, AB2_ADDR, CD1_ADDR, AB1_ADDR, CD0_ADDR, AB0_ADDR, MUX_ADDR};
+const unsigned char emulating[9] = {AD_34D, AD_12D, AD_34C, AD_12C, AD_34B, AD_12B, AD_34A, AD_12A, MUX_ADDR};
 
 // TX/RX buffer
 #define TR_BUF_LEN 24
@@ -163,6 +199,50 @@ uint8_t trb[TR_BUF_LEN] = { 0x00 };
 uint8_t resp = 0x00;
 
 void setup() {
+  digitalWrite(RELAY_1A_PIN, LOW);
+  pinMode(RELAY_1A_PIN, OUTPUT);
+  digitalWrite(RELAY_1B_PIN, LOW);
+  pinMode(RELAY_1B_PIN, OUTPUT);
+  digitalWrite(RELAY_1C_PIN, LOW);
+  pinMode(RELAY_1C_PIN, OUTPUT);
+  digitalWrite(RELAY_1D_PIN, LOW);
+  pinMode(RELAY_1D_PIN, OUTPUT);
+  digitalWrite(RELAY_1E_PIN, LOW);
+  pinMode(RELAY_1E_PIN, OUTPUT);
+
+  digitalWrite(RELAY_2A_PIN, LOW);
+  pinMode(RELAY_2A_PIN, OUTPUT);
+  digitalWrite(RELAY_2B_PIN, LOW);
+  pinMode(RELAY_2B_PIN, OUTPUT);
+  digitalWrite(RELAY_2C_PIN, LOW);
+  pinMode(RELAY_2C_PIN, OUTPUT);
+  digitalWrite(RELAY_2D_PIN, LOW);
+  pinMode(RELAY_2D_PIN, OUTPUT);
+  digitalWrite(RELAY_2E_PIN, LOW);
+  pinMode(RELAY_2E_PIN, OUTPUT);
+  
+  digitalWrite(RELAY_3A_PIN, LOW);
+  pinMode(RELAY_3A_PIN, OUTPUT);
+  digitalWrite(RELAY_3B_PIN, LOW);
+  pinMode(RELAY_3B_PIN, OUTPUT);
+  digitalWrite(RELAY_3C_PIN, LOW);
+  pinMode(RELAY_3C_PIN, OUTPUT);
+  digitalWrite(RELAY_3D_PIN, LOW);
+  pinMode(RELAY_3D_PIN, OUTPUT);
+  digitalWrite(RELAY_3E_PIN, LOW);
+  pinMode(RELAY_3E_PIN, OUTPUT);
+
+  digitalWrite(RELAY_4A_PIN, LOW);
+  pinMode(RELAY_4A_PIN, OUTPUT);
+  digitalWrite(RELAY_4B_PIN, LOW);
+  pinMode(RELAY_4B_PIN, OUTPUT);
+  digitalWrite(RELAY_4C_PIN, LOW);
+  pinMode(RELAY_4C_PIN, OUTPUT);
+  digitalWrite(RELAY_4D_PIN, LOW);
+  pinMode(RELAY_4D_PIN, OUTPUT);
+  digitalWrite(RELAY_4E_PIN, LOW);
+  pinMode(RELAY_4E_PIN, OUTPUT);
+
   D(Serial.begin(115200)); // serial port for debugging
   D(Serial.println(F("________Begin Setup Function________")));
 
@@ -200,7 +280,7 @@ void setup() {
 
   //pinMode(21, INPUT_PULLUP);
   //pinMode(20, INPUT_PULLUP);
-  
+
   D(Serial.println(F("________End Setup Function________")));
 }
 
@@ -215,7 +295,7 @@ uint32_t loop_counter = 0ul;
  //5000 ~= 1 second (this might change if the main loop changes speed)
 uint32_t short_while_loops = 5000ul;
 
-// true when comms to the switches connecting A4, B4, C4 and D4 are active instead of A0, B0, C0 and D0
+// true when comms to the switches connecting 1E, 2E, 3E and 4E are active instead of 1A, 2A, 3A and 4A
 bool mux_state = false;
 
 // main program loop
@@ -235,70 +315,96 @@ void rqhandler (){
   D(Serial.print(F("Master would like some data from 0x")));
   D(Serial.print(slave_address, HEX));
   D(Serial.print(F(" (")));
-  switch (slave_address) {
-    case (MUX_ADDR):
-      D(Serial.println(F("MUX)")));
-      break;
+  if (!mux_state) {
+    switch (slave_address) {
+      case (MUX_ADDR):
+        D(Serial.println(F("MUX)")));
+        break;
 
-    case (AB0_ADDR):
-      D(Serial.print(F("AB0) sending: 0x")));
-      D(Serial.println(resp, HEX));
-      Wire.write(resp);
-      break;
+      case (AD_12A):
+        D(Serial.print(F("12A) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
 
-    case (CD0_ADDR):
-      D(Serial.print(F("CD0) sending: 0x")));
-      D(Serial.println(resp, HEX));
-      Wire.write(resp);
-      break;
+      case (AD_34A):
+        D(Serial.print(F("34A) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
 
-    case (AB1_ADDR):
-      D(Serial.print(F("AB1) sending: 0x")));
-      D(Serial.println(resp, HEX));
-      Wire.write(resp);
-      break;
+      case (AD_12B):
+        D(Serial.print(F("12B) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
 
-    case (CD1_ADDR):
-      D(Serial.print(F("CD1) sending: 0x")));
-      D(Serial.println(resp, HEX));
-      Wire.write(resp);
-      break;
+      case (AD_34B):
+        D(Serial.print(F("34B) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
 
-    case (AB2_ADDR):
-      D(Serial.print(F("AB2) sending: 0x")));
-      D(Serial.println(resp, HEX));
-      Wire.write(resp);
-      break;
+      case (AD_12C):
+        D(Serial.print(F("12C) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
 
-    case (CD2_ADDR):
-      D(Serial.print(F("CD2) sending: 0x")));
-      D(Serial.println(resp, HEX));
-      Wire.write(resp);
-      break;
+      case (AD_34C):
+        D(Serial.print(F("34C) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
 
-    case (AB3_ADDR):
-      D(Serial.print(F("AB3) sending: 0x")));
-      D(Serial.println(resp, HEX));
-      Wire.write(resp);
-      break;
+      case (AD_12D):
+        D(Serial.print(F("12D) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
 
-    case (CD3_ADDR):
-      D(Serial.print(F("CD3) sending: 0x")));
-      D(Serial.println(resp, HEX));
-      Wire.write(resp);
-      break;
+      case (AD_34D):
+        D(Serial.print(F("34D) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
 
-    default:
-      D(Serial.print(F("====UNKNOWN====)")));
-      D(Serial.println(resp, HEX));
-      Wire.write(resp);
-      break;
+      default:
+        D(Serial.print(F("====UNKNOWN====)")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
+    }
+  } else {  // mux switch acuated
+    switch (slave_address) {
+      case (MUX_ADDR):
+        D(Serial.println(F("MUX)")));
+        break;
+
+      case (AD_12A):
+        D(Serial.print(F("12E) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
+
+      case (AD_34A):
+        D(Serial.print(F("34E) sending: 0x")));
+        D(Serial.println(resp, HEX));
+        Wire.write(resp);
+        break;
+
+      default:
+        D(Serial.print(F("====UNKNOWN====)")));
+        D(Serial.println(resp, HEX));
+        break;
+    }
   }
-  
 }
 
 // handles a write from the master
 void rxhandler(int nbytes) {
+  int active_pin1 = LED_PIN;  // default do nothing
+  int active_pin2 = LED_PIN;  // default do nothing
   uint8_t c;
   int i;
   int j;
@@ -309,46 +415,86 @@ void rxhandler(int nbytes) {
   D(Serial.print(slave_address, HEX));
   D(Serial.print(F(" (")));
 
-  switch (slave_address) {
-    case (MUX_ADDR):
-      D(Serial.print(F("i2c MUX)")));
-      break;
+  if (!mux_state) {
+    switch (slave_address) {
+      case (MUX_ADDR):
+        D(Serial.print(F("i2c MUX)")));
+        break;
 
-    case (AB0_ADDR):
-      D(Serial.print(F("AB0)    ")));
-      break;
+      case (AD_12A):
+        active_pin1 = RELAY_1A_PIN;
+        active_pin2 = RELAY_2A_PIN;
+        D(Serial.print(F("12A)    ")));
+        break;
 
-    case (CD0_ADDR):
-      D(Serial.print(F("CD0)    ")));
-      break;
+      case (AD_34A):
+        active_pin1 = RELAY_3A_PIN;
+        active_pin2 = RELAY_4A_PIN;
+        D(Serial.print(F("34A)    ")));
+        break;
 
-    case (AB1_ADDR):
-      D(Serial.print(F("AB1)    ")));
-      break;
+      case (AD_12B):
+        active_pin1 = RELAY_1B_PIN;
+        active_pin2 = RELAY_2B_PIN;
+        D(Serial.print(F("12B)    ")));
+        break;
 
-    case (CD1_ADDR):
-      D(Serial.print(F("CD1)    ")));
-      break;
+      case (AD_34B):
+        active_pin1 = RELAY_3B_PIN;
+        active_pin2 = RELAY_4B_PIN;
+        D(Serial.print(F("34B)    ")));
+        break;
 
-    case (AB2_ADDR):
-      D(Serial.print(F("AB2)    ")));
-      break;
+      case (AD_12C):
+        active_pin1 = RELAY_1C_PIN;
+        active_pin2 = RELAY_2C_PIN;
+        D(Serial.print(F("12C)    ")));
+        break;
 
-    case (CD2_ADDR):
-      D(Serial.print(F("CD2)    ")));
-      break;
+      case (AD_34C):
+        active_pin1 = RELAY_3C_PIN;
+        active_pin2 = RELAY_4C_PIN;
+        D(Serial.print(F("34C)    ")));
+        break;
 
-    case (AB3_ADDR):
-      D(Serial.print(F("AB3)    ")));
-      break;
+      case (AD_12D):
+        active_pin1 = RELAY_1D_PIN;
+        active_pin2 = RELAY_2D_PIN;
+        D(Serial.print(F("12D)    ")));
+        break;
 
-    case (CD3_ADDR):
-      D(Serial.print(F("CD3)    ")));
-      break;
+      case (AD_34D):
+        active_pin1 = RELAY_3D_PIN;
+        active_pin2 = RELAY_4D_PIN;
+        D(Serial.print(F("34D)    ")));
+        break;
 
-    default:
-      D(Serial.print(F("UNKNOWN)")));
-      break;
+      default:
+        D(Serial.print(F("UNKNOWN)")));
+        break;
+    }
+  } else {  // mux switch acuated
+    switch (slave_address) {
+      case (MUX_ADDR):
+        D(Serial.print(F("i2c MUX)")));
+        break;
+
+      case (AD_12A):
+        active_pin1 = RELAY_1E_PIN;
+        active_pin2 = RELAY_2E_PIN;
+        D(Serial.print(F("12E)    ")));
+        break;
+
+      case (AD_34A):
+        active_pin1 = RELAY_3E_PIN;
+        active_pin2 = RELAY_4E_PIN;
+        D(Serial.print(F("34E)    ")));
+        break;
+
+      default:
+        D(Serial.print(F("UNKNOWN)")));
+        break;
+    }
   }
 
   i = nbytes; // rx byte counter
@@ -376,9 +522,40 @@ void rxhandler(int nbytes) {
   // }
 
   D(Serial.println());
-  if ((nbytes == 2) && (trb[0] == 0x6)){
-    D(Serial.println(F("saving...")));
-    resp = trb[1];
+  if (slave_address == MUX_ADDR) {  // the i2c mux has been addressed
+    if (nbytes == 1) {
+      if (trb[0] == 0x1) {
+        mux_state = false;  // comms for A,B,C,D row switches active
+      } else if (trb[0] == 0x2) {
+        mux_state = true;  // comms for E row switches active
+      }
+    }
+  } else {  // a switch has been addressed
+    if (nbytes == 2) {
+      if ((trb[0] == 0x6) || (trb[0] == 0x14)|| (trb[0] == 0x15)) {
+        // programming latches or the test register now
+        // 0x14 is for latches 1, 3
+        // 0x15 is for latches 2, 4
+        resp = trb[1];  // will send this on next request
+        if (trb[0] == 0x14){
+          if (resp & 0x01){
+            digitalWrite(active_pin1, HIGH);
+            D(Serial.println(F("1st bank (1,3) switch close")));
+          } else {
+            digitalWrite(active_pin1, LOW);
+            D(Serial.println(F("1st bank (1,3) switch open")));
+          }
+        } else if (trb[0] == 0x15) {
+          if (resp & 0x01){
+            digitalWrite(active_pin2, HIGH);
+            D(Serial.println(F("2nd bank (2,4) switch close")));
+          } else {
+            digitalWrite(active_pin2, LOW);
+            D(Serial.println(F("2nd bank (2,4) switch open")));
+          }
+        }
+      }
+    }
   }
 }
 
@@ -402,474 +579,6 @@ void do_every_short_while(void){
     }
 #endif // DEBUG
 }
-
-/* 
-// actuates the I2C mux in tca9546
-// true turns on a channel, false turns it off
-void tca9546_write(uint8_t address, bool ch3, bool ch2, bool ch1, bool ch0) {
-  uint8_t control = 0x00;
-  int tries_left = 5; // number of retries left
-
-  if (ch0){
-    control |= 0x01<<0;
-  }
-  if (ch1){
-    control |= 0x01<<1;
-  }
-  if (ch2){
-    control |= 0x01<<2;
-  }
-  if (ch3){
-    control |= 0x01<<3;
-  }
-
-  while (tries_left > 0){
-    Wire.beginTransmission(address);
-    if (Wire.write(control) == 1){
-      if (Wire.endTransmission() == 0){
-       break;
-      }
-    }
-    tries_left--;
-    delayMicroseconds(5); // min bus free time for 100kHz comms mode
-  }
-}
-*/
-
-/* 
-// reads a byte from a register address for mcp2XS17
-uint8_t mcp_read(bool spi, uint8_t dev_address, uint8_t reg_address){
-  uint8_t ctrl_byte;
-  uint8_t result = 0x00;
-  int tries_left = 5; // number of retries left for i2c
-
-  if (spi){
-    ctrl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_READ | (dev_address << 1);
-    digitalWrite(PE_CS_PIN, LOW); //select
-#ifdef BIT_BANG_SPI
-    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, ctrl_byte);
-    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
-    result = shiftIn(PE_MISO_PIN, PE_SCK_PIN, MSBFIRST);
-#else
-    //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ethernet ic is not selected
-    //SPI.endTransaction();
-    SPI.beginTransaction(switch_spi_settings);
-    SPI.transfer(ctrl_byte); // read operation
-    SPI.transfer(reg_address); // iodirA register address
-    result = SPI.transfer(0x00); // read the register
-    SPI.endTransaction();
-#endif
-    digitalWrite(PE_CS_PIN, HIGH); //deselect
-  } else { //i2c
-    if (dev_address <= 7){ // use the first port on the i2c mux for the first 8 expanders
-      tca9546_write(TCA9546_ADDRESS, false, false, false, true);
-      ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
-    } else { // use the second port on the i2c mux for the last two expanders
-      tca9546_write(TCA9546_ADDRESS, false, false, true, false);
-      ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | (dev_address-8);
-    }
-    while (tries_left > 0){
-      Wire.beginTransmission(ctrl_byte);
-      if (Wire.write(reg_address) == 1){
-        if (Wire.endTransmission(false) == 0){
-          if(Wire.requestFrom(ctrl_byte, (uint8_t)1, (uint8_t)true) == 1){
-            result = Wire.read();
-            break;
-          } // end message length check
-        } // end Wire.endTransmission check
-      } // end Wire.write check
-      tries_left--;
-      delayMicroseconds(5); // min bus free time for 100kHz comms mode
-    }
-    // close off the i2c mux
-    tca9546_write(TCA9546_ADDRESS, false, false, false, false);
-  }
-
-  return(result);
-}
-*/
-
-/* 
-// writes a byte to a register address for mcp23X17
-void mcp_write(bool spi, uint8_t dev_address, uint8_t reg_address, uint8_t value){
-  uint8_t ctrl_byte;
-  uint8_t payload[2];
-  int tries_left = 5; // number of retries left (for i2c)
-  if (spi){
-    ctrl_byte = MCP_SPI_CTRL_BYTE_HEADER | MCP_WRITE | (dev_address << 1);
-    digitalWrite(PE_CS_PIN, LOW); //select
-#ifdef BIT_BANG_SPI
-    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, ctrl_byte);
-    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, reg_address);
-    shiftOut(PE_MOSI_PIN, PE_SCK_PIN, MSBFIRST, value);
-#else
-    //digitalWrite(ETHERNET_SPI_CS, LOW); //make super sure ethernet ic is not selected
-    //SPI.endTransaction();
-    SPI.beginTransaction(switch_spi_settings);
-    SPI.transfer(ctrl_byte); // write operation
-    SPI.transfer(reg_address); // iodirA register address
-    SPI.transfer(value); // write the register
-    SPI.endTransaction();
-#endif
-    digitalWrite(PE_CS_PIN, HIGH); //deselect
-  } else { // i2c
-    if (dev_address <= 7){ // use the first port on the i2c mux for the first 8 expanders
-      tca9546_write(TCA9546_ADDRESS, false, false, false, true);
-      ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | dev_address;
-    } else { // use the second port on the i2c mux for the last two expanders
-      tca9546_write(TCA9546_ADDRESS, false, false, true, false);
-      ctrl_byte = MCP_I2C_CTRL_BYTE_HEADER | (dev_address-8);
-    }
-    payload[0] = reg_address;
-    payload[1] = value;
-
-    while (tries_left > 0){
-      Wire.beginTransmission(ctrl_byte);
-      if (Wire.write(payload, 2) == 2){
-        if (Wire.endTransmission(true) == 0){
-          break;
-        }
-      }
-      tries_left--;
-      delayMicroseconds(5); // min bus free time for 100kHz comms mode
-    }
-    tca9546_write(TCA9546_ADDRESS, false, false, false, false);
-  }
-}
-*/
-
-/* 
-int mcp_all_off(bool spi){
-  int error = NO_ERROR;
-  uint8_t mcp_readback_value = 0x00;
-  uint8_t mcp_dev_addr, max_address;
-  if (spi){
-    max_address = 7;
-  } else {
-    max_address = 9;
-  }
-
-  for(mcp_dev_addr = 0; mcp_dev_addr <= max_address; mcp_dev_addr++){
-    // set output latch A low
-    mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, 0x00);
-    mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATA_ADDR);
-    if (mcp_readback_value != 0x00) {
-      error += ERR_SELECTION_A_DISAGREE;
-    }
-
-    // set output latch B low
-    mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, 0x00);
-    mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATB_ADDR);
-    if (mcp_readback_value != 0x00) {
-      error += ERR_SELECTION_B_DISAGREE;
-    }
-  }
-  return (error);
-}
-*/
-
-/* 
-// checks for ability to communicate with a mux chip
-bool mcp_check(bool spi, uint8_t address){
-  bool foundIT = false;
-  uint8_t previous = 0x00;
-  uint8_t response = 0x00;
-  uint8_t test_pattern = 0b10100010;
-
-  previous = mcp_read(spi, address, MCP_DEFVALA_ADDR); //and try to read it back
-  mcp_write(spi, address, MCP_DEFVALA_ADDR, test_pattern); //program the test value
-  response = mcp_read(spi, address, MCP_DEFVALA_ADDR); //and try to read it back
-  mcp_write(spi, address, MCP_DEFVALA_ADDR, previous); //revert the old value
-
-  if (response == test_pattern){
-    foundIT = true;
-  } else {
-    foundIT = false;
-  }
-  return (foundIT);
-}
-*/
-
-/* 
-uint32_t mcp_setup(bool spi){
-  // comms variables
-  uint8_t mcp_dev_addr, mcp_reg_value;
-  uint32_t connected_devices_mask = 0x00000000;
-  uint8_t max_address;
-
-  if (spi){
-    // pulse CS to clear out weirdness from startup
-    digitalWrite(PE_CS_PIN, LOW); //select
-    delayMicroseconds(1);
-    digitalWrite(PE_CS_PIN, HIGH); //deselect
-    max_address = 7;
-  } else {
-    max_address = 9;
-  }
-
-  //loop through all the expanders and set their registers properly
-  for (mcp_dev_addr = 0; mcp_dev_addr <= max_address; mcp_dev_addr ++){
-    
-    if (spi){
-      //probs this first one programs all the parts at once (if they just POR'd)
-      mcp_reg_value = 0x08; //set IOCON --> HACON.HAEN enable pin addresses (spi only)
-      mcp_write(spi, mcp_dev_addr, MCP_IOCON_ADDR, mcp_reg_value);
-    }
-
-    //mcp_reg_value = 0x00; // PORTA out low
-    //mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value);
-
-    //mcp_reg_value = 0x00; // PORTB out low
-    //mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value);
-
-    mcp_reg_value = 0x00; //all of PORTA to are outputs
-    mcp_write(spi, mcp_dev_addr, MCP_IODIRA_ADDR, mcp_reg_value);
-  
-    mcp_reg_value = 0x00; //all of PORTB to are outputs
-    mcp_write(spi, mcp_dev_addr, MCP_IODIRB_ADDR, mcp_reg_value);
-
-    if (mcp_check(spi, mcp_dev_addr)) {
-      connected_devices_mask |= (0x01 << mcp_dev_addr);
-    }
-  }
-  return (connected_devices_mask);
-}
-*/
-
-// // turns on a pixel at address pix
-// // pix is an address string of form 1: BC or form 2: ABC
-// // A is the substrate row on [1,4]
-// // B is the substrage col on [a,h] (form 1) or [a,e] (form 2)
-// // C is the pixel number to connect on [0,8] (form 1) or [0,6] (form 2), "0" being a special selection that disconnects the substrate
-// // otherwise if C is longer than one character long, it will be converted into a uint16 and used to directly program the latches
-// int set_pix(String pix){
-//   bool dlp = false;  // direct latch program mode
-//   uint16_t dlp_val = 0;
-//   bool spi = true;
-//   int error = NO_ERROR;
-//   int switch_layout = NO_SWITCHES;
-//   // places to keep mcp comms variables
-//   uint8_t mcp_dev_addr, mcp_reg_addr, mcp_reg_value;
-//   uint8_t mcp_readback_value = 0x00;
-//   int row = -1; // substrate row. optional given by user in number, optional, "1" is the first row)
-//   int col = -1; // substrate col. required. given by user as a letter. "a" is the first col
-//   int pixel = -1; // required. given by user as a number. "1" is the first pixel. "0" disconnects the substrate
-//   int min_row = -1;
-//   int max_row = -1;
-//   int min_col = -1;
-//   int max_col = -1;
-//   int min_pix = -1;
-//   int max_pix = -1;
-
-//   if (isDigit(pix.charAt(0))){
-//     switch_layout = OTTER_SWITCHES;
-//   } else {
-//     switch_layout = SNAITH_SWITCHES;
-//   }
-
-//   switch (switch_layout){
-//     case SNAITH_SWITCHES:
-//       row = 0;
-//       col = pix.charAt(0) - 'a'; //convert a, b, c... to 0, 1, 2...
-//       pixel = pix.charAt(1) - '0'; //convert string "0", "1", "2", "3"... to int 0, 1, 2...
-//       min_row = 0;
-//       max_row = 0;
-//       min_col = 0;
-//       max_col = 7;
-//       min_pix = 0;
-//       max_pix = 8;
-//       spi = true;
-//       if (pix.length() > 2){
-//         pixel = 1;  // just make sure the pixel check works
-//         dlp = true;
-//         dlp_val = (uint16_t) (pix.substring(1).toInt() & 0xffff);
-//       }
-//       break;
-//     case OTTER_SWITCHES:
-//       row = pix.charAt(0) - '1'; //convert string "1", "2", "3"... to int 0, 1, 2...
-//       col = pix.charAt(1) - 'a'; //convert a, b, c... to 0, 1, 2...
-//       pixel = pix.charAt(2) - '0'; //convert string "0", "1", "2", "3"... to int 0, 1, 2...
-//       min_row = 0;
-//       max_row = 3;
-//       min_col = 0;
-//       max_col = 4;
-//       min_pix = 0;
-//       max_pix = 6;
-//       spi = false;
-//       if (pix.length() > 3){
-//         pixel = 1;  // jsut make sure the pixel check works
-//         dlp = true;
-//         dlp_val = (uint16_t) (pix.substring(2).toInt() & 0xffff);
-//       }
-//       break;
-//   /*
-//   * 
-//   *    =====otter substrate grid=====
-//   *     --------------------------
-//   *    |       o                  |
-//   *    | 4E   4D   4C   4B   4A   |
-//   *    |                          |
-//   *    | 3E   3D   3C   3B   3A   |
-//   *    |                          |   --> mux box connections
-//   *    | 2E   2D   2C   2B   2A   |   -->    this side
-//   *    |                          |
-//   *    | 1E   1D   1C   1B   1A   |
-//   *    |                          |
-//   *     --------------------------
-//   *  o = orientation hole
-//   * 
-//   *    =====otter substrate layout=====
-//   *        ---------------------
-//   *        | x x    x x    x x+|
-//   *        |  3      2      1  |
-//   *        |                   |
-//   *        |x                 x|
-//   *        | (J9)B        T(J8)|
-//   *        |x                 x|
-//   *        |                   |
-//   *        |  6      5      4  |
-//   *        |ox x    x x    x x |
-//   *        ---------------------
-//   * x      = pin contact location
-//   * number = pixel numbering as marked on pin PCB
-//   * B or T = connection to common terminal
-//   * +      = the cross mark on the PCB
-//   * o      = the circle mark on the PCB
-//   * 
-//   * pixels by switch bit:
-//   * bit 0 --> pix 1
-//   * bit 1 --> pix 4
-//   * bit 2 --> pix 2
-//   * bit 3 --> pix 5
-//   * bit 4 --> pix 3
-//   * bit 5 --> pix 6
-//   * bit 6 --> 1 side common (T,J8)
-//   * bit 7 --> 3 side common (B,J9) 
-//   * 
-//   * switch bit by pixel number
-//   * 1 side common (T,J8) --> bit 6
-//   * pix 1                --> bit 0
-//   * pix 2                --> bit 2
-//   * pix 3                --> bit 4
-//   * pix 4                --> bit 1
-//   * pix 5                --> bit 3
-//   * pix 6                --> bit 5
-//   * 3 side common (B,J9) --> bit 7
-//   */
-//     default:
-//       error = ERR_BAD_SUBSTRATE;
-//   }
-
-//   if ((col >= min_col) && (col <= max_col) && (row >= min_row) && (row <= max_row)) {
-//     //mcp_all_off();
-//     if ((pixel >= min_pix) && (pixel <= max_pix)) {
-//       switch (switch_layout){
-//         case SNAITH_SWITCHES:
-//           mcp_dev_addr = col;
-// 	        if (dlp){
-//             mcp_reg_value = (uint8_t) (dlp_val & 0xff);
-//           } else {
-//             if ((pixel == 8) || (pixel == 6) || (pixel == 7) || (pixel == 5)) {
-//               mcp_reg_value = TOP; // top bus bar connection is closer to these pixels
-//             } else if ((pixel == 4) || (pixel == 2) || (pixel == 3) || (pixel == 1)){
-//               mcp_reg_value = BOT; // bottom bus bar connection is closer to the rest
-//             } else { // turn off portA (pixel 0)
-//               mcp_reg_value = 0x00;
-//             }
-// 	        }
-//           mcp_write(spi, mcp_dev_addr, MCP_OLATA_ADDR, mcp_reg_value); //enable TOP or BOT bus connection
-//           mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATA_ADDR);
-          
-//           if (mcp_readback_value != mcp_reg_value) {
-//             error += ERR_SELECTION_A_DISAGREE;
-//           }
-
-//           if (dlp){
-//             mcp_reg_value = (uint8_t) ((dlp_val >> 8) & 0xff);
-//           } else {
-//             if (pixel == 0) {
-//               mcp_reg_value = 0x00;
-//             } else {
-//               mcp_reg_value = 0x01 << (pixel -1);
-//             }
-// 	        }
-//           mcp_write(spi, mcp_dev_addr, MCP_OLATB_ADDR, mcp_reg_value); //enable pixel connection
-//           mcp_readback_value = mcp_read(spi, mcp_dev_addr, MCP_OLATB_ADDR);
-
-//           if (mcp_readback_value != mcp_reg_value) {
-//             error += ERR_SELECTION_B_DISAGREE;
-//           }
-//           break;
-        
-//         case OTTER_SWITCHES:
-//           mcp_dev_addr = col;
-//           mcp_dev_addr <<= 1;
-
-//           if ((row == 2) || (row == 3)){
-//             mcp_dev_addr++; // these rows are connected to the second expander on the NCD switch boards
-//           }
-
-//           if ((row == 0) || (row == 2)){
-//             mcp_reg_addr = MCP_OLATA_ADDR;
-//           } else if ((row == 1) || (row == 3)){
-//             mcp_reg_addr = MCP_OLATB_ADDR;
-//           }
-
-//           if (dlp){
-//             mcp_reg_value = (uint8_t) (dlp_val & 0xff);
-//           } else {
-//             // set the pixel lines
-//             switch (pixel){
-//               case 1:
-//                 mcp_reg_value = 0x01<<0;
-//                 break;
-//               case 2:
-//                 mcp_reg_value = 0x01<<2;
-//                 break;
-//               case 3:
-//                 mcp_reg_value = 0x01<<4;
-//                 break;
-//               case 4:
-//                 mcp_reg_value = 0x01<<1;
-//                 break;
-//               case 5:
-//                 mcp_reg_value = 0x01<<3;
-//                 break;
-//               case 6:
-//                 mcp_reg_value = 0x01<<5;
-//                 break;
-//             }
-
-//             // work out which common pins we'll use (this will only matter with cut pcb jumpers on baseboards)
-//             if ((pixel == 1) || (pixel == 2) || (pixel == 4)) {
-//               mcp_reg_value |= 0x01<<6; // top bus bar connection is closer to these pixels
-//             } else if ((pixel == 5) || (pixel == 6) || (pixel == 3)){
-//               mcp_reg_value |= 0x01<<7; // bottom bus bar connection is closer to the rest
-//             } else { // turn off portA (pixel 0)
-//               mcp_reg_value = 0x00;
-//             }
-// 	        }
-
-//           mcp_write(spi, mcp_dev_addr, mcp_reg_addr, mcp_reg_value); // do it.
-//           mcp_readback_value = mcp_read(spi, mcp_dev_addr, mcp_reg_addr);
-
-//           // check it's done
-//           if (mcp_readback_value != mcp_reg_value) {
-//             error += ERR_SELECTION_A_DISAGREE;
-//           }
-//           break;
-//         default:
-//           error = ERR_BAD_SUBSTRATE;
-//       }
-//     } else { // pixel out of bounds
-//       error = ERR_BAD_PIX;
-//     }
-//   } else { // substrate out of bounds
-//     error = ERR_BAD_SUBSTRATE;
-//   }
-//   return (error);
-// }
-
 
 // reset reason detection
 void reset_reason(void){
