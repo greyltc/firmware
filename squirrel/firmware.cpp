@@ -48,6 +48,7 @@
 
 //#define TCA9546_ADDRESS 0x70
 
+#define RELAY_RTD_PIN 29
 #define RELAY_1A_PIN 30
 #define RELAY_1B_PIN 31
 #define RELAY_1C_PIN 32
@@ -199,48 +200,51 @@ uint8_t trb[TR_BUF_LEN] = { 0x00 };
 uint8_t resp = 0x00;
 
 void setup() {
-  digitalWrite(RELAY_1A_PIN, LOW);
+  digitalWrite(RELAY_RTD_PIN, HIGH);
+  pinMode(RELAY_RTD_PIN, OUTPUT);
+
+  digitalWrite(RELAY_1A_PIN, HIGH);
   pinMode(RELAY_1A_PIN, OUTPUT);
-  digitalWrite(RELAY_1B_PIN, LOW);
+  digitalWrite(RELAY_1B_PIN, HIGH);
   pinMode(RELAY_1B_PIN, OUTPUT);
-  digitalWrite(RELAY_1C_PIN, LOW);
+  digitalWrite(RELAY_1C_PIN, HIGH);
   pinMode(RELAY_1C_PIN, OUTPUT);
-  digitalWrite(RELAY_1D_PIN, LOW);
+  digitalWrite(RELAY_1D_PIN, HIGH);
   pinMode(RELAY_1D_PIN, OUTPUT);
-  digitalWrite(RELAY_1E_PIN, LOW);
+  digitalWrite(RELAY_1E_PIN, HIGH);
   pinMode(RELAY_1E_PIN, OUTPUT);
 
-  digitalWrite(RELAY_2A_PIN, LOW);
+  digitalWrite(RELAY_2A_PIN, HIGH);
   pinMode(RELAY_2A_PIN, OUTPUT);
-  digitalWrite(RELAY_2B_PIN, LOW);
+  digitalWrite(RELAY_2B_PIN, HIGH);
   pinMode(RELAY_2B_PIN, OUTPUT);
-  digitalWrite(RELAY_2C_PIN, LOW);
+  digitalWrite(RELAY_2C_PIN, HIGH);
   pinMode(RELAY_2C_PIN, OUTPUT);
-  digitalWrite(RELAY_2D_PIN, LOW);
+  digitalWrite(RELAY_2D_PIN, HIGH);
   pinMode(RELAY_2D_PIN, OUTPUT);
-  digitalWrite(RELAY_2E_PIN, LOW);
+  digitalWrite(RELAY_2E_PIN, HIGH);
   pinMode(RELAY_2E_PIN, OUTPUT);
   
-  digitalWrite(RELAY_3A_PIN, LOW);
+  digitalWrite(RELAY_3A_PIN, HIGH);
   pinMode(RELAY_3A_PIN, OUTPUT);
-  digitalWrite(RELAY_3B_PIN, LOW);
+  digitalWrite(RELAY_3B_PIN, HIGH);
   pinMode(RELAY_3B_PIN, OUTPUT);
-  digitalWrite(RELAY_3C_PIN, LOW);
+  digitalWrite(RELAY_3C_PIN, HIGH);
   pinMode(RELAY_3C_PIN, OUTPUT);
-  digitalWrite(RELAY_3D_PIN, LOW);
+  digitalWrite(RELAY_3D_PIN, HIGH);
   pinMode(RELAY_3D_PIN, OUTPUT);
-  digitalWrite(RELAY_3E_PIN, LOW);
+  digitalWrite(RELAY_3E_PIN, HIGH);
   pinMode(RELAY_3E_PIN, OUTPUT);
 
-  digitalWrite(RELAY_4A_PIN, LOW);
+  digitalWrite(RELAY_4A_PIN, HIGH);
   pinMode(RELAY_4A_PIN, OUTPUT);
-  digitalWrite(RELAY_4B_PIN, LOW);
+  digitalWrite(RELAY_4B_PIN, HIGH);
   pinMode(RELAY_4B_PIN, OUTPUT);
-  digitalWrite(RELAY_4C_PIN, LOW);
+  digitalWrite(RELAY_4C_PIN, HIGH);
   pinMode(RELAY_4C_PIN, OUTPUT);
-  digitalWrite(RELAY_4D_PIN, LOW);
+  digitalWrite(RELAY_4D_PIN, HIGH);
   pinMode(RELAY_4D_PIN, OUTPUT);
-  digitalWrite(RELAY_4E_PIN, LOW);
+  digitalWrite(RELAY_4E_PIN, HIGH);
   pinMode(RELAY_4E_PIN, OUTPUT);
 
   D(Serial.begin(115200)); // serial port for debugging
@@ -532,26 +536,36 @@ void rxhandler(int nbytes) {
     }
   } else {  // a switch has been addressed
     if (nbytes == 2) {
-      if ((trb[0] == 0x6) || (trb[0] == 0x14)|| (trb[0] == 0x15)) {
+      if ((trb[0] == 0x6) || (trb[0] == 0x14) || (trb[0] == 0x15)) {
         // programming latches or the test register now
         // 0x14 is for latches 1, 3
         // 0x15 is for latches 2, 4
-        resp = trb[1];  // will send this on next request
+        resp = trb[1];  // will send this on next request 
         if (trb[0] == 0x14){
           if (resp & 0x01){
-            digitalWrite(active_pin1, HIGH);
+            digitalWrite(active_pin1, LOW);
             D(Serial.println(F("1st bank (1,3) switch close")));
           } else {
-            digitalWrite(active_pin1, LOW);
+            digitalWrite(active_pin1, HIGH);
             D(Serial.println(F("1st bank (1,3) switch open")));
+            if (resp & ~0x01) {  // rtd
+              digitalWrite(RELAY_RTD_PIN, LOW);
+            } else {
+              digitalWrite(RELAY_RTD_PIN, HIGH);
+            }
           }
         } else if (trb[0] == 0x15) {
           if (resp & 0x01){
-            digitalWrite(active_pin2, HIGH);
+            digitalWrite(active_pin2, LOW);
             D(Serial.println(F("2nd bank (2,4) switch close")));
           } else {
-            digitalWrite(active_pin2, LOW);
+            digitalWrite(active_pin2, HIGH);
             D(Serial.println(F("2nd bank (2,4) switch open")));
+            if (resp & ~0x01) {  // rtd
+              digitalWrite(RELAY_RTD_PIN, LOW);
+            } else {
+              digitalWrite(RELAY_RTD_PIN, HIGH);
+            }
           }
         }
       }
