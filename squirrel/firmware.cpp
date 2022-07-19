@@ -543,6 +543,7 @@ void rxhandler(int nbytes) {
         resp = trb[1];  // will send this on next request 
         if (trb[0] == 0x14){
           if (resp & 0x01){
+            digitalWrite(RELAY_RTD_PIN, HIGH);
             digitalWrite(active_pin1, LOW);
             D(Serial.println(F("1st bank (1,3) switch close")));
           } else {
@@ -556,6 +557,7 @@ void rxhandler(int nbytes) {
           }
         } else if (trb[0] == 0x15) {
           if (resp & 0x01){
+            digitalWrite(RELAY_RTD_PIN, HIGH);
             digitalWrite(active_pin2, LOW);
             D(Serial.println(F("2nd bank (2,4) switch close")));
           } else {
