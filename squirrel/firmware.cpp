@@ -201,7 +201,7 @@ uint8_t trb[TR_BUF_LEN] = { 0x00 };
 uint8_t resp = 0x00;
 
 void setup() {
-  set_default_pin_states();
+  set_def_pin_states();
 
   D(Serial.begin(115200)); // serial port for debugging
   D(Serial.println(F("________Begin Setup Function________")));
