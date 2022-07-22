@@ -184,6 +184,7 @@ void resetFlagsInit(void)
 void reset(void);
 void reset_reason(void);
 void do_every_short_while(void);
+void set_def_pin_states(void);
 
 // handlers
 void rqhandler (void);
@@ -200,52 +201,7 @@ uint8_t trb[TR_BUF_LEN] = { 0x00 };
 uint8_t resp = 0x00;
 
 void setup() {
-  digitalWrite(RELAY_RTD_PIN, HIGH);
-  pinMode(RELAY_RTD_PIN, OUTPUT);
-
-  digitalWrite(RELAY_1A_PIN, HIGH);
-  pinMode(RELAY_1A_PIN, OUTPUT);
-  digitalWrite(RELAY_1B_PIN, HIGH);
-  pinMode(RELAY_1B_PIN, OUTPUT);
-  digitalWrite(RELAY_1C_PIN, HIGH);
-  pinMode(RELAY_1C_PIN, OUTPUT);
-  digitalWrite(RELAY_1D_PIN, HIGH);
-  pinMode(RELAY_1D_PIN, OUTPUT);
-  digitalWrite(RELAY_1E_PIN, HIGH);
-  pinMode(RELAY_1E_PIN, OUTPUT);
-
-  digitalWrite(RELAY_2A_PIN, HIGH);
-  pinMode(RELAY_2A_PIN, OUTPUT);
-  digitalWrite(RELAY_2B_PIN, HIGH);
-  pinMode(RELAY_2B_PIN, OUTPUT);
-  digitalWrite(RELAY_2C_PIN, HIGH);
-  pinMode(RELAY_2C_PIN, OUTPUT);
-  digitalWrite(RELAY_2D_PIN, HIGH);
-  pinMode(RELAY_2D_PIN, OUTPUT);
-  digitalWrite(RELAY_2E_PIN, HIGH);
-  pinMode(RELAY_2E_PIN, OUTPUT);
-  
-  digitalWrite(RELAY_3A_PIN, HIGH);
-  pinMode(RELAY_3A_PIN, OUTPUT);
-  digitalWrite(RELAY_3B_PIN, HIGH);
-  pinMode(RELAY_3B_PIN, OUTPUT);
-  digitalWrite(RELAY_3C_PIN, HIGH);
-  pinMode(RELAY_3C_PIN, OUTPUT);
-  digitalWrite(RELAY_3D_PIN, HIGH);
-  pinMode(RELAY_3D_PIN, OUTPUT);
-  digitalWrite(RELAY_3E_PIN, HIGH);
-  pinMode(RELAY_3E_PIN, OUTPUT);
-
-  digitalWrite(RELAY_4A_PIN, HIGH);
-  pinMode(RELAY_4A_PIN, OUTPUT);
-  digitalWrite(RELAY_4B_PIN, HIGH);
-  pinMode(RELAY_4B_PIN, OUTPUT);
-  digitalWrite(RELAY_4C_PIN, HIGH);
-  pinMode(RELAY_4C_PIN, OUTPUT);
-  digitalWrite(RELAY_4D_PIN, HIGH);
-  pinMode(RELAY_4D_PIN, OUTPUT);
-  digitalWrite(RELAY_4E_PIN, HIGH);
-  pinMode(RELAY_4E_PIN, OUTPUT);
+  set_default_pin_states();
 
   D(Serial.begin(115200)); // serial port for debugging
   D(Serial.println(F("________Begin Setup Function________")));
@@ -542,6 +498,7 @@ void rxhandler(int nbytes) {
         // 0x15 is for latches 2, 4
         resp = trb[1];  // will send this on next request 
         if (trb[0] == 0x14){
+          set_def_pin_states();
           if (resp & 0x01){
             digitalWrite(RELAY_RTD_PIN, HIGH);
             digitalWrite(active_pin1, LOW);
@@ -556,6 +513,7 @@ void rxhandler(int nbytes) {
             }
           }
         } else if (trb[0] == 0x15) {
+          set_def_pin_states();
           if (resp & 0x01){
             digitalWrite(RELAY_RTD_PIN, HIGH);
             digitalWrite(active_pin2, LOW);
@@ -616,4 +574,54 @@ void reset_reason(void){
 #endif // DEBUG
     NOP;
   }
+}
+
+// det default relay pin states
+void set_def_pin_states(void) {
+  digitalWrite(RELAY_RTD_PIN, HIGH);
+  pinMode(RELAY_RTD_PIN, OUTPUT);
+
+  digitalWrite(RELAY_1A_PIN, HIGH);
+  pinMode(RELAY_1A_PIN, OUTPUT);
+  digitalWrite(RELAY_1B_PIN, HIGH);
+  pinMode(RELAY_1B_PIN, OUTPUT);
+  digitalWrite(RELAY_1C_PIN, HIGH);
+  pinMode(RELAY_1C_PIN, OUTPUT);
+  digitalWrite(RELAY_1D_PIN, HIGH);
+  pinMode(RELAY_1D_PIN, OUTPUT);
+  digitalWrite(RELAY_1E_PIN, HIGH);
+  pinMode(RELAY_1E_PIN, OUTPUT);
+
+  digitalWrite(RELAY_2A_PIN, HIGH);
+  pinMode(RELAY_2A_PIN, OUTPUT);
+  digitalWrite(RELAY_2B_PIN, HIGH);
+  pinMode(RELAY_2B_PIN, OUTPUT);
+  digitalWrite(RELAY_2C_PIN, HIGH);
+  pinMode(RELAY_2C_PIN, OUTPUT);
+  digitalWrite(RELAY_2D_PIN, HIGH);
+  pinMode(RELAY_2D_PIN, OUTPUT);
+  digitalWrite(RELAY_2E_PIN, HIGH);
+  pinMode(RELAY_2E_PIN, OUTPUT);
+  
+  digitalWrite(RELAY_3A_PIN, HIGH);
+  pinMode(RELAY_3A_PIN, OUTPUT);
+  digitalWrite(RELAY_3B_PIN, HIGH);
+  pinMode(RELAY_3B_PIN, OUTPUT);
+  digitalWrite(RELAY_3C_PIN, HIGH);
+  pinMode(RELAY_3C_PIN, OUTPUT);
+  digitalWrite(RELAY_3D_PIN, HIGH);
+  pinMode(RELAY_3D_PIN, OUTPUT);
+  digitalWrite(RELAY_3E_PIN, HIGH);
+  pinMode(RELAY_3E_PIN, OUTPUT);
+
+  digitalWrite(RELAY_4A_PIN, HIGH);
+  pinMode(RELAY_4A_PIN, OUTPUT);
+  digitalWrite(RELAY_4B_PIN, HIGH);
+  pinMode(RELAY_4B_PIN, OUTPUT);
+  digitalWrite(RELAY_4C_PIN, HIGH);
+  pinMode(RELAY_4C_PIN, OUTPUT);
+  digitalWrite(RELAY_4D_PIN, HIGH);
+  pinMode(RELAY_4D_PIN, OUTPUT);
+  digitalWrite(RELAY_4E_PIN, HIGH);
+  pinMode(RELAY_4E_PIN, OUTPUT);
 }
